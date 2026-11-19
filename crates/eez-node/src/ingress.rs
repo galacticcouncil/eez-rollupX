@@ -17,6 +17,12 @@
 //! is held rather than risking a cross-chain transaction bypassing composition.
 //! One front per source chain (invariant 8).
 //!
+//! On a chain with a `config.hydration` genesis section the L2 front never holds
+//! a Hydration protocol transaction (an oracle update or keeper transaction): Sync
+//! blocks place held transactions after EEZ's native loads, outside the protocol
+//! prefix. One the front would hold is rejected instead and must use the L2
+//! mempool; one it classifies as ordinary is forwarded there as usual.
+//!
 //! A creation has no target and is forwarded directly to its source chain. A
 //! codeless target that reaches cross-chain admission is rejected with why.
 
@@ -63,6 +69,11 @@ pub enum Admission {
 /// nonce for this direction. An existing queued nonce may be replaced in
 /// place. A gapped held tx would poison the all-or-nothing bundle and break
 /// bundle-mates' chains.
+///
+/// `hydration_roles` are the L2 genesis's `config.hydration` roles (`None` on a
+/// stock chain). With them, an outbound (L2-source) Hydration protocol
+/// transaction is rejected before any lookup: a Sync block places held
+/// transactions after a native load, outside the protocol prefix.
 pub async fn gate_and_hold(
     envelope: &TxEnvelope,
     raw_tx: &Bytes,
@@ -70,6 +81,7 @@ pub async fn gate_and_hold(
     held_pool: &HeldPool,
     expected_source_chain_id: u64,
     validation_provider: &RootProvider,
+    hydration_roles: Option<hydration_node::ProtocolRoles>,
 ) -> Admission {
     if let Err(msg) = validate_front_envelope(envelope, direction, expected_source_chain_id) {
         return Admission::Rejected(msg);
@@ -81,6 +93,12 @@ pub async fn gate_and_hold(
     let Ok(sender) = envelope.recover_signer() else {
         return Admission::Rejected("signature recovery failed".into());
     };
+    if direction == Direction::Outbound
+        && let Some(reason) =
+            hydration_node::outbound_hold_rejection(hydration_roles, sender, envelope.input())
+    {
+        return Admission::Rejected(reason);
+    }
     // The front forwards creations, so HTTP never gets here. This guards direct
     // callers of a public fn.
     let Some(to) = envelope.to() else {
@@ -323,6 +341,8 @@ struct Ctx {
     composer_methods: jsonrpsee::RpcModule<()>,
     estimator: Option<EstimationService>,
     fee_quotes: Option<Arc<crate::fee_quotes::FeeQuotes>>,
+    /// The L2 genesis's `config.hydration` roles; `None` on a stock chain.
+    hydration_roles: Option<hydration_node::ProtocolRoles>,
 }
 
 /// Verify that a configured cross-chain front points at its expected source chain.
@@ -386,6 +406,7 @@ pub(crate) async fn run_cross_chain_front(
         composer_methods,
         None,
         fee_quotes,
+        None,
     )
     .await
 }
@@ -403,6 +424,7 @@ pub(crate) async fn run_cross_chain_front_with_estimator(
     composer_methods: jsonrpsee::RpcModule<()>,
     estimator: Option<EstimationService>,
     fee_quotes: Option<Arc<crate::fee_quotes::FeeQuotes>>,
+    hydration_roles: Option<hydration_node::ProtocolRoles>,
 ) -> eyre::Result<()> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await?;
@@ -433,6 +455,7 @@ pub(crate) async fn run_cross_chain_front_with_estimator(
         composer_methods,
         estimator,
         fee_quotes,
+        hydration_roles,
     };
     loop {
         let (stream, _peer) = match listener.accept().await {
@@ -955,6 +978,7 @@ async fn intercept_send_raw(
         &ctx.held_pool,
         ctx.expected_source_chain_id,
         &ctx.validation_provider,
+        ctx.hydration_roles,
     )
     .await
     {
@@ -1012,9 +1036,33 @@ mod tests {
     use alloy_provider::mock::Asserter;
     use alloy_rpc_types_eth::AccessList;
     use alloy_signer_local::PrivateKeySigner;
+    use hydration_node::rules::ORACLE_UPDATE_SELECTOR;
     use serde_json::json;
 
     use super::*;
+
+    /// The admission gate on a stock chain (no `config.hydration`). It shadows
+    /// [`super::gate_and_hold`] for every test that does not exercise Hydration's
+    /// guard; those call the production function with roles explicitly.
+    async fn gate_and_hold(
+        envelope: &TxEnvelope,
+        raw_tx: &Bytes,
+        direction: Direction,
+        held_pool: &HeldPool,
+        expected_source_chain_id: u64,
+        validation_provider: &RootProvider,
+    ) -> Admission {
+        super::gate_and_hold(
+            envelope,
+            raw_tx,
+            direction,
+            held_pool,
+            expected_source_chain_id,
+            validation_provider,
+            None,
+        )
+        .await
+    }
 
     #[derive(Clone, Default)]
     struct CapturedLogs(Arc<std::sync::Mutex<String>>);
@@ -1166,6 +1214,7 @@ mod tests {
             composer_methods: jsonrpsee::RpcModule::new(()),
             estimator: None,
             fee_quotes: None,
+            hydration_roles: None,
         };
         let (_, _, raw) = signed_eip1559(31337, U256::ZERO, 21_000, 1);
         // Bind capture to every poll of the production interception future;
@@ -1368,6 +1417,180 @@ mod tests {
 
         assert!(matches!(admission, Admission::Held(_)));
         assert_eq!(pool.len(), 1);
+    }
+
+    fn signed_protocol(key: &PrivateKeySigner, input: &'static [u8]) -> (TxEnvelope, Bytes) {
+        let mut tx = TxEip1559 {
+            chain_id: 31337,
+            nonce: 0,
+            gas_limit: 100_000,
+            max_fee_per_gas: 1,
+            max_priority_fee_per_gas: 1,
+            to: TxKind::Call(Address::ZERO),
+            value: U256::ZERO,
+            access_list: alloy_eips::eip2930::AccessList::default(),
+            input: Bytes::from_static(input),
+        };
+        let sig = key.sign_transaction_sync(&mut tx).expect("tx signs");
+        let envelope = TxEnvelope::from(tx.into_signed(sig));
+        let raw = Bytes::from(envelope.encoded_2718());
+        (envelope, raw)
+    }
+
+    /// `config.hydration` roles held by keys that are not development-mnemonic
+    /// accounts (Hydreth's compiled-in roles are anvil 0 and 2).
+    fn hydration_roles() -> (
+        PrivateKeySigner,
+        PrivateKeySigner,
+        Option<hydration_node::ProtocolRoles>,
+    ) {
+        let oracle = PrivateKeySigner::from_bytes(&B256::repeat_byte(0xa1)).unwrap();
+        let keeper = PrivateKeySigner::from_bytes(&B256::repeat_byte(0xb2)).unwrap();
+        let roles = hydration_node::ProtocolRoles::new(oracle.address(), keeper.address());
+        (oracle, keeper, Some(roles))
+    }
+
+    #[tokio::test]
+    async fn protocol_transactions_are_rejected_before_sync_admission() {
+        let (oracle, keeper, roles) = hydration_roles();
+        let pool = HeldPool::new(Default::default());
+        // No mocked responses: the guard answers before any source-chain lookup.
+        let provider = ProviderBuilder::default().connect_mocked_client(Asserter::new());
+
+        for (envelope, raw) in [
+            signed_protocol(&oracle, &ORACLE_UPDATE_SELECTOR),
+            signed_protocol(&keeper, &[]),
+        ] {
+            let msg = rejection(
+                super::gate_and_hold(
+                    &envelope,
+                    &raw,
+                    Direction::Outbound,
+                    &pool,
+                    31337,
+                    &provider,
+                    roles,
+                )
+                .await,
+            );
+            assert!(msg.contains("must use the L2 mempool"), "{msg}");
+        }
+        assert_eq!(pool.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn protocol_identity_on_l1_does_not_trigger_the_l2_sync_guard() {
+        let (oracle, _, roles) = hydration_roles();
+        let (envelope, raw) = signed_protocol(&oracle, &ORACLE_UPDATE_SELECTOR);
+        let pool = HeldPool::new(Default::default());
+        let asserter = Asserter::new();
+        let provider = ProviderBuilder::default().connect_mocked_client(asserter.clone());
+        push_admission_lookups(&asserter, 1_000_000, 0);
+
+        let admission = super::gate_and_hold(
+            &envelope,
+            &raw,
+            Direction::Inbound,
+            &pool,
+            31337,
+            &provider,
+            roles,
+        )
+        .await;
+
+        assert!(matches!(admission, Admission::Held(_)));
+        assert_eq!(pool.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn sync_guard_is_inert_without_the_section_and_for_unconfigured_roles() {
+        let (oracle, keeper, roles) = hydration_roles();
+        let anvil_0: PrivateKeySigner =
+            "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+                .parse()
+                .unwrap();
+        let anvil_2: PrivateKeySigner =
+            "5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+                .parse()
+                .unwrap();
+        for (key, input, roles) in [
+            // A stock chain holds the configured keys' transactions as any other.
+            (&oracle, &ORACLE_UPDATE_SELECTOR[..], None),
+            (&keeper, &[][..], None),
+            // Hydreth's compiled-in roles hold nothing on a chain with its own.
+            (&anvil_0, &ORACLE_UPDATE_SELECTOR[..], roles),
+            (&anvil_2, &[][..], roles),
+            // The oracle updater's other calls are ordinary.
+            (&oracle, &[0xde, 0xad][..], roles),
+        ] {
+            let (envelope, raw) = signed_protocol(key, input);
+            let pool = HeldPool::new(Default::default());
+            let asserter = Asserter::new();
+            let provider = ProviderBuilder::default().connect_mocked_client(asserter.clone());
+            push_admission_lookups(&asserter, 1_000_000, 0);
+
+            let admission = super::gate_and_hold(
+                &envelope,
+                &raw,
+                Direction::Outbound,
+                &pool,
+                31337,
+                &provider,
+                roles,
+            )
+            .await;
+
+            assert!(matches!(admission, Admission::Held(_)), "{admission:?}");
+            assert_eq!(pool.len(), 1);
+        }
+    }
+
+    /// The L2 front hands its configured roles to admission. Its upstream is
+    /// unreachable, so trace classification fails closed into the admission gate
+    /// without a listening socket.
+    #[tokio::test]
+    async fn l2_front_applies_its_hydration_roles_to_held_submissions() {
+        let (_, keeper, roles) = hydration_roles();
+        let (_, raw) = signed_protocol(&keeper, &[]);
+        for roles in [roles, None] {
+            let asserter = Asserter::new();
+            push_admission_lookups(&asserter, 1_000_000, 0);
+            let pool = Arc::new(HeldPool::new(Default::default()));
+            let ctx = Ctx {
+                ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+                client: reqwest::Client::new(),
+                upstream_rpc_url: "http://127.0.0.1:1".into(),
+                direction: Direction::Outbound,
+                held_pool: pool.clone(),
+                validation_provider: ProviderBuilder::default().connect_mocked_client(asserter),
+                expected_source_chain_id: 31337,
+                dispatch_address: Address::ZERO,
+                composer_info: Arc::new(json!({})),
+                composer_methods: jsonrpsee::RpcModule::new(()),
+                estimator: None,
+                fee_quotes: None,
+                hydration_roles: roles,
+            };
+
+            let response = intercept_send_raw(&ctx, &raw.to_string(), &json!({"id":1}))
+                .await
+                .unwrap();
+
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let response: Value = serde_json::from_slice(&body).unwrap();
+            if roles.is_some() {
+                let message = response["error"]["message"].as_str().unwrap();
+                assert!(message.contains("must use the L2 mempool"), "{response}");
+                assert_eq!(pool.len(), 0);
+            } else {
+                assert_eq!(
+                    response["result"],
+                    json!(keccak256(raw.as_ref())),
+                    "{response}"
+                );
+                assert_eq!(pool.len(), 1);
+            }
+        }
     }
 
     #[tokio::test]

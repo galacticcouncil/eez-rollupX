@@ -1,0 +1,23 @@
+# Vendored from galacticcouncil/hydration-zisk `crates/hydration-consensus-rules`.
+# `src/` must stay byte-identical to that crate (check with `diff -r`): Hydreth,
+# its ZisK guest and this chain must classify protocol transactions the same way.
+# Only this manifest differs. It keeps the source crate's licence instead of
+# inheriting this workspace's.
+[package]
+name                   = "hydration-consensus-rules"
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license                = "Apache-2.0"
+repository             = "https://github.com/galacticcouncil/hydration-zisk"
+description            = "Portable consensus-critical rules for the Hydration protocol"
+
+[dependencies]
+alloy-primitives.workspace = true
+
+[features]
+default = ["std"]
+std     = ["alloy-primitives/std"]
+
+[lints]
+workspace = true

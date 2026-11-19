@@ -21,6 +21,10 @@ members = [
     "crates/eez-prover",
     "crates/eez-prover-client",
     "crates/eez-testkit",
+    "crates/hydration-config",
+    "crates/hydration-consensus-rules",
+    "crates/hydration-node",
+    "crates/hydration-precompiles",
 ]
 
 [workspace.package]
@@ -181,7 +185,15 @@ eez-protocol       = { path = "crates/eez-protocol" }
 eez-prover         = { path = "crates/eez-prover" }
 eez-testkit        = { path = "crates/eez-testkit" }
 
+# Hydration's own crates. hydration-consensus-rules is vendored from hydration-zisk
+# (src byte-identical); the other three live here. EEZ crates carry thin hooks.
+hydration-config          = { path = "crates/hydration-config" }
+hydration-consensus-rules = { path = "crates/hydration-consensus-rules" }
+hydration-node            = { path = "crates/hydration-node" }
+hydration-precompiles     = { path = "crates/hydration-precompiles" }
+
 alloy-consensus-any = { version = "=2.5.0" }
+reth-consensus = { git = "https://github.com/paradigmxyz/reth", tag = "v2.11.0" }
 reth-consensus-common = { git = "https://github.com/paradigmxyz/reth", tag = "v2.11.0" }
 reth-engine-local = { git = "https://github.com/paradigmxyz/reth", tag = "v2.11.0" }
 reth-errors = { git = "https://github.com/paradigmxyz/reth", tag = "v2.11.0" }

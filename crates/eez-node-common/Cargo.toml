@@ -57,6 +57,7 @@ alloy-rpc-types-trace = { workspace = true, optional = true }
 futures-util = { workspace = true, optional = true }
 eez-evm.workspace = true
 eez-primitives.workspace = true
+hydration-node.workspace = true
 reth-consensus-common.workspace = true
 reth-engine-local.workspace = true
 reth-engine-primitives.workspace = true
@@ -80,10 +81,13 @@ reth-db-common.workspace = true
 reth-trie-parallel.workspace = true
 serde_json.workspace = true
 alloy-genesis.workspace = true
+hydration-config.workspace = true
 reth-network-api.workspace = true
 reth-payload-builder.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 alloy-provider.workspace = true
+alloy-signer.workspace = true
+alloy-signer-local.workspace = true
 alloy-transport = "=2.5.0"
 
 [lints]

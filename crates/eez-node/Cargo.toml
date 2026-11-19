@@ -21,6 +21,8 @@ eez-payload-codec.workspace = true
 eez-protocol.workspace      = true
 eez-prover.workspace        = true
 eez-prover-client.workspace = true
+# Hydration's ingress guard, active only with `config.hydration`.
+hydration-node.workspace    = true
 
 # reth
 reth-engine-local.workspace = true

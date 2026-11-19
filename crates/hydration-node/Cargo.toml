@@ -1,0 +1,33 @@
+[package]
+name                   = "hydration-node"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+rust-version.workspace = true
+description            = "Hydration's protocol-transaction prefix in the EEZ node and signer: consensus wrapper, payload-builder ordering, cross-chain ingress guard and block check."
+
+# EEZ crates (eez-node-common, eez-node, eez-proof-signer) call into this crate
+# and must stay out of its dependencies: it reads `config.hydration` through
+# eez-evm, which depends on none of them.
+[dependencies]
+eez-evm.workspace                   = true
+hydration-consensus-rules.workspace = true
+
+alloy-consensus.workspace        = true
+alloy-primitives.workspace       = true
+reth-chainspec.workspace         = true
+reth-consensus.workspace         = true
+reth-execution-types.workspace   = true
+reth-primitives-traits.workspace = true
+reth-transaction-pool.workspace  = true
+
+eyre.workspace = true
+
+[dev-dependencies]
+alloy-genesis.workspace    = true
+eez-primitives.workspace   = true
+hydration-config.workspace = true
+serde_json.workspace       = true
+
+[lints]
+workspace = true

@@ -951,3 +951,228 @@ fn accepted_osaka_profile_has_the_finalization_features_used_by_cleanup() {
     assert!(raw.feature(EvmFeatures::EIP161));
     assert!(!raw.feature(EvmFeatures::EIP8246));
 }
+
+/// Hydration's counter through `EezEvmFactory`, built by Reth's
+/// `EthBlockExecutorFactory::evm_with_env` exactly as the node builds it.
+mod hydration {
+    use super::*;
+    use hydration_config::HydrationConfig;
+    use hydration_precompiles::{COUNTER_ADDRESS, SELECTOR_GET, SELECTOR_INCREMENT};
+    use reth_evm::{Evm as _, precompile_cache::PrecompileCachePolicy};
+    use reth_evm_ethereum::EvmFactory as _;
+
+    fn hydration_factory() -> EezEvmFactory {
+        EezEvmFactory {
+            hydration: Some(
+                HydrationConfig::new(1, Address::repeat_byte(0xa1), Address::repeat_byte(0xb2))
+                    .unwrap(),
+            ),
+            ..EezEvmFactory::for_rollup(COLLECTOR).unwrap()
+        }
+    }
+    fn call_counter(nonce: u64, selector: [u8; 4], gas_limit: u64) -> EezEvmTx {
+        ordinary_tx(TxLegacy {
+            chain_id: Some(901),
+            nonce,
+            gas_price: 10,
+            gas_limit,
+            to: TxKind::Call(COUNTER_ADDRESS),
+            input: selector.to_vec().into(),
+            ..Default::default()
+        })
+    }
+    fn word_at(output: &Bytes, index: usize) -> U256 {
+        U256::from_be_slice(&output[index * 32..(index + 1) * 32])
+    }
+
+    #[test]
+    fn hydration_counter_runs_and_reads_back_only_when_selected() {
+        let mut evm = create_evm(
+            hydration_factory(),
+            database(Bytes::new(), COLLECTOR),
+            environment(),
+        );
+        assert!(evm.has_precompile(&COUNTER_ADDRESS));
+        // 21,000 + 4 nonzero calldata bytes (64) + 200 base + 2,100 cold sload + 5,000 sstore.
+        let first = execute(&mut evm, call_counter(0, SELECTOR_INCREMENT, 100_000), USER).unwrap();
+        assert!(first.result.is_success(), "{:?}", first.result);
+        assert_eq!(U256::from_be_slice(&first.result.output), U256::from(1));
+        assert_eq!(first.result.tx_gas_used(), 28_364);
+        assert_eq!(
+            first
+                .pending_state
+                .account_info(&COUNTER_ADDRESS)
+                .unwrap()
+                .nonce,
+            1
+        );
+        evm.overlay_db_mut().commit_pending(&first.pending_state);
+        let read = execute(&mut evm, call_counter(1, SELECTOR_GET, 100_000), USER).unwrap();
+        assert!(read.result.is_success(), "{:?}", read.result);
+        assert_eq!(U256::from_be_slice(&read.result.output), U256::from(1));
+        assert_eq!(read.result.tx_gas_used(), 23_364);
+        evm.overlay_db_mut().commit_pending(&read.pending_state);
+        let second = execute(&mut evm, call_counter(2, SELECTOR_INCREMENT, 100_000), USER).unwrap();
+        assert_eq!(U256::from_be_slice(&second.result.output), U256::from(2));
+
+        // Not selected: the stock rollup factory and L1 simulation. 0x..0800 is a plain
+        // empty account there.
+        for factory in [
+            EezEvmFactory::for_rollup(COLLECTOR).unwrap(),
+            EezEvmFactory::for_l1_simulation(),
+        ] {
+            let mut evm = create_evm(factory, database(Bytes::new(), COLLECTOR), environment());
+            assert!(!evm.has_precompile(&COUNTER_ADDRESS));
+            let plain =
+                execute(&mut evm, call_counter(0, SELECTOR_INCREMENT, 100_000), USER).unwrap();
+            assert!(plain.result.is_success(), "{:?}", plain.result);
+            assert!(plain.result.output.is_empty());
+            // EIP-7623 floor: 21,000 + 10 * (4 nonzero bytes * 4 tokens) = 21,160 > 21,064.
+            assert_eq!(plain.result.tx_gas_used(), 21_160);
+        }
+    }
+
+    #[test]
+    fn hydration_counter_underfunded_direct_call_changes_nothing() {
+        let mut evm = create_evm(
+            hydration_factory(),
+            database(Bytes::new(), COLLECTOR),
+            environment(),
+        );
+        // 21,064 intrinsic + 1,000 for the precompile, which needs 7,300.
+        let short = execute(&mut evm, call_counter(0, SELECTOR_INCREMENT, 22_064), USER).unwrap();
+        assert!(!short.result.is_success(), "{:?}", short.result);
+        assert_eq!(short.result.tx_gas_used(), 22_064);
+        assert!(
+            short
+                .pending_state
+                .account_info(&COUNTER_ADDRESS)
+                .is_none_or(|info| info.nonce == 0)
+        );
+        evm.overlay_db_mut().commit_pending(&short.pending_state);
+        let read = execute(&mut evm, call_counter(1, SELECTOR_GET, 100_000), USER).unwrap();
+        assert_eq!(U256::from_be_slice(&read.result.output), U256::ZERO);
+    }
+
+    /// Optionally CALL increment with 3,000 gas (out of gas), then measure a funded CALL
+    /// increment with GAS before and after. Returns `[ret2 | 0 | ok1 | ok2 | cost2]`.
+    fn probe(with_underfunded_first: bool) -> Bytes {
+        let mut code = vec![0x5f, 0x61, 0x01, 0x00, 0x52]; // pre-expand memory to 0x120
+        code.extend_from_slice(&[0x63, 0xd0, 0x9d, 0xe0, 0x8a, 0x60, 0xe0, 0x1b, 0x5f, 0x52]);
+        if with_underfunded_first {
+            code.extend_from_slice(&[
+                0x60, 0x20, 0x60, 0x40, 0x60, 0x04, 0x5f, 0x5f, 0x61, 0x08, 0x00, 0x61, 0x0b, 0xb8,
+                0xf1, 0x60, 0x80, 0x52,
+            ]);
+        }
+        code.extend_from_slice(&[
+            0x5a, 0x60, 0x20, 0x60, 0x40, 0x60, 0x04, 0x5f, 0x5f, 0x61, 0x08, 0x00, 0x62, 0x01,
+            0x00, 0x00, 0xf1, 0x60, 0xa0, 0x52, 0x5a, 0x90, 0x03, 0x60, 0xc0, 0x52, 0x60, 0xa0,
+            0x60, 0x40, 0xf3,
+        ]);
+        code.into()
+    }
+
+    #[test]
+    fn hydration_counter_oog_frame_rolls_back_write_and_slot_warmth() {
+        let mut costs = Vec::new();
+        for with_first in [false, true] {
+            let mut evm = create_evm(
+                hydration_factory(),
+                database(probe(with_first), COLLECTOR),
+                environment(),
+            );
+            let tx = ordinary_tx(TxLegacy {
+                gas_limit: 300_000,
+                ..ordinary()
+            });
+            let result = execute(&mut evm, tx, USER).unwrap();
+            assert!(result.result.is_success(), "{:?}", result.result);
+            let out = &result.result.output;
+            assert_eq!(
+                word_at(out, 0),
+                U256::from(1),
+                "funded call sees the untouched counter"
+            );
+            assert_eq!(
+                word_at(out, 2),
+                U256::ZERO,
+                "underfunded call (or none) reports failure"
+            );
+            assert_eq!(word_at(out, 3), U256::from(1), "funded call succeeds");
+            assert_eq!(
+                result
+                    .pending_state
+                    .account_info(&COUNTER_ADDRESS)
+                    .unwrap()
+                    .nonce,
+                1
+            );
+            costs.push(word_at(out, 4));
+        }
+        // Equal costs: the out-of-gas frame's cold SLOAD was un-warmed (EIP-2929 scope
+        // revert). Otherwise the funded call would be 2,000 cheaper (warm 100, cold 2,100).
+        assert_eq!(costs[0], costs[1]);
+    }
+
+    /// STATICCALL and DELEGATECALL increment, then STATICCALL get. Returns
+    /// `[get value | static increment ok | delegate increment ok | static get ok]`.
+    fn restricted_calls() -> Bytes {
+        let call = |opcode: u8, result_at: u8| {
+            [
+                0x60, 0x20, 0x60, 0x20, 0x60, 0x04, 0x5f, 0x61, 0x08, 0x00, 0x62, 0x01, 0x00, 0x00,
+                opcode, 0x60, result_at, 0x52,
+            ]
+        };
+        let mut code = vec![0x63, 0xd0, 0x9d, 0xe0, 0x8a, 0x60, 0xe0, 0x1b, 0x5f, 0x52];
+        code.extend_from_slice(&call(0xfa, 0x40));
+        code.extend_from_slice(&call(0xf4, 0x60));
+        code.extend_from_slice(&[0x63, 0x6d, 0x4c, 0xe6, 0x3c, 0x60, 0xe0, 0x1b, 0x5f, 0x52]);
+        code.extend_from_slice(&call(0xfa, 0x80));
+        code.extend_from_slice(&[0x60, 0x80, 0x60, 0x20, 0xf3]);
+        code.into()
+    }
+
+    #[test]
+    fn hydration_counter_rejects_static_and_delegated_writes() {
+        let mut evm = create_evm(
+            hydration_factory(),
+            database(restricted_calls(), COLLECTOR),
+            environment(),
+        );
+        let result = execute(&mut evm, ordinary_tx(ordinary()), USER).unwrap();
+        assert!(result.result.is_success(), "{:?}", result.result);
+        let out = &result.result.output;
+        assert_eq!(word_at(out, 0), U256::ZERO, "nothing was written");
+        assert_eq!(word_at(out, 1), U256::ZERO, "STATICCALL increment reverts");
+        assert_eq!(
+            word_at(out, 2),
+            U256::ZERO,
+            "DELEGATECALL increment reverts"
+        );
+        assert_eq!(word_at(out, 3), U256::from(1), "STATICCALL get is allowed");
+        assert!(
+            result
+                .pending_state
+                .account_info(&COUNTER_ADDRESS)
+                .is_none_or(|info| info.nonce == 0)
+        );
+    }
+
+    /// Reth would serve a cached result for a cache-eligible precompile without running
+    /// it, so a stateful counter would stop counting. Reth's default is `Disabled`; a
+    /// bump that changes the default, or an override here, must fail this test.
+    #[test]
+    fn precompile_cache_policy_stays_disabled_for_the_stateful_counter() {
+        for factory in [
+            hydration_factory(),
+            EezEvmFactory::for_rollup(COLLECTOR).unwrap(),
+            EezEvmFactory::for_l1_simulation(),
+        ] {
+            assert!(matches!(
+                factory.precompile_cache_policy(SpecId::OSAKA),
+                PrecompileCachePolicy::Disabled
+            ));
+        }
+    }
+}

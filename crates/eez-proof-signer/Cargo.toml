@@ -17,6 +17,8 @@ eez-protocol.workspace = true
 eez-primitives.workspace = true
 eez-evm = { workspace = true, features = ["stateless"] }
 eez-driver = { workspace = true, features = ["observation", "derivation"] }
+# Hydration's protocol-transaction prefix, active only with `config.hydration`.
+hydration-node.workspace = true
 
 alloy-consensus.workspace = true
 alloy-eips.workspace = true

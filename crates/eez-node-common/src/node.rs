@@ -10,6 +10,7 @@ use alloy_rpc_types_engine::ExecutionData;
 use eez_evm::EezEvmConfig;
 use eez_primitives::engine::EezPayloadAttributes as PayloadAttributes;
 use eez_primitives::{Block, EezPrimitives, EezTxEnvelope, engine::EezEngineTypes};
+use hydration_node::HydrationConsensus;
 use reth_chainspec::ChainSpec;
 use reth_engine_primitives::{EngineApiValidator, PayloadValidator};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -106,17 +107,32 @@ impl<N: FullNodeTypes<Types = EezNode>> ExecutorBuilder<N> for EezExecutorBuilde
     }
 }
 
+/// Composer and follower both build their consensus here, with [`consensus_for`].
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EezConsensusBuilder;
 
+/// Ethereum beacon consensus for `spec`, plus Hydration's protocol-transaction
+/// prefix when the L2 genesis has a `config.hydration` section.
+///
+/// # Errors
+///
+/// A present but malformed or invalid `config.hydration`: the node refuses to
+/// start rather than run stock rules.
+pub fn consensus_for(
+    spec: Arc<ChainSpec>,
+) -> eyre::Result<Arc<HydrationConsensus<EthBeaconConsensus<ChainSpec>>>> {
+    HydrationConsensus::for_chain(EthBeaconConsensus::new(spec.clone()), spec.as_ref())
+        .map(Arc::new)
+}
+
 impl<N: FullNodeTypes<Types = EezNode>> ConsensusBuilder<N> for EezConsensusBuilder {
-    type Consensus = Arc<EthBeaconConsensus<ChainSpec>>;
+    type Consensus = Arc<HydrationConsensus<EthBeaconConsensus<ChainSpec>>>;
 
     fn build_consensus(
         self,
         ctx: &BuilderContext<N>,
     ) -> impl Future<Output = eyre::Result<Self::Consensus>> {
-        ready(Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec()))))
+        ready(consensus_for(ctx.chain_spec()))
     }
 }
 
@@ -215,5 +231,48 @@ impl<N: FullNodeTypes<Types = Self>> reth_node_builder::Node<N> for EezNode {
 
     fn add_ons(&self) -> Self::AddOns {
         crate::rpc::eez_add_ons(Default::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, address};
+    use hydration_node::ProtocolRoles;
+
+    const ORACLE: Address = address!("00000000000000000000000000000000000000a1");
+    const KEEPER: Address = address!("00000000000000000000000000000000000000b2");
+
+    fn spec(section: Option<serde_json::Value>) -> Arc<ChainSpec> {
+        let mut genesis: alloy_genesis::Genesis =
+            serde_json::from_slice(include_bytes!("../../../genesis.json")).unwrap();
+        if let Some(section) = section {
+            genesis
+                .config
+                .extra_fields
+                .insert(hydration_config::GENESIS_FIELD.into(), section);
+        }
+        Arc::new(ChainSpec::from_genesis(genesis))
+    }
+
+    /// The node's consensus takes its roles from the chain spec it is built for.
+    /// The Engine-level verdicts are in `payload_builder::tests::hydration_prefix`.
+    #[test]
+    fn consensus_for_takes_the_roles_from_the_genesis_section() {
+        assert_eq!(consensus_for(spec(None)).unwrap().roles(), None);
+        let section = serde_json::json!({
+            "rulesVersion": 1,
+            "oracleUpdater": ORACLE,
+            "peplKeeper": KEEPER,
+        });
+        assert_eq!(
+            consensus_for(spec(Some(section))).unwrap().roles(),
+            Some(ProtocolRoles::new(ORACLE, KEEPER))
+        );
+        let error = consensus_for(spec(Some(serde_json::Value::Null))).unwrap_err();
+        assert!(
+            error.to_string().contains("malformed config.hydration"),
+            "{error}"
+        );
     }
 }

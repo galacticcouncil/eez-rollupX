@@ -16,6 +16,7 @@ use eez_payload_codec::BlockDaSizer;
 use eez_primitives::engine::EezBuiltPayload;
 use eez_primitives::engine::EezPayloadAttributes as EthPayloadAttributes;
 use eez_primitives::{EezPrimitives, EezTxEnvelope as TransactionSigned};
+use hydration_node::{PoolTransactions, ProtocolRoles};
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder, PayloadConfig,
 };
@@ -134,7 +135,11 @@ impl EezPayloadBuilder {
 
 impl<Types, Node, Pool, Evm> PayloadBuilderBuilder<Node, Pool, Evm> for EezPayloadBuilder
 where
-    Types: NodeTypes<ChainSpec: reth_chainspec::EthereumHardforks, Primitives = EezPrimitives>,
+    Types: NodeTypes<
+            ChainSpec: reth_chainspec::EthereumHardforks
+                           + reth_chainspec::EthChainSpec<Header = alloy_consensus::Header>,
+            Primitives = EezPrimitives,
+        >,
     Node: FullNodeTypes<Types = Types>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
@@ -152,15 +157,13 @@ where
         pool: Pool,
         evm_config: Evm,
     ) -> impl Future<Output = eyre::Result<Self::PayloadBuilder>> {
-        std::future::ready(Ok(EezRuntimePayloadBuilder {
-            client: ctx.provider().clone(),
+        std::future::ready(EezRuntimePayloadBuilder::new(
+            ctx.chain_spec().as_ref(),
+            ctx.provider().clone(),
             pool,
             evm_config,
-            data_guard: self.data_guard,
-            config: EthereumBuilderConfig::new()
-                .with_gas_limit(BUILDER_GAS_LIMIT)
-                .with_extra_data(Bytes::from_static(BUILDER_EXTRA_DATA)),
-        }))
+            self.data_guard,
+        ))
     }
 }
 
@@ -171,6 +174,47 @@ pub struct EezRuntimePayloadBuilder<Pool, Client, Evm> {
     evm_config: Evm,
     config: EthereumBuilderConfig,
     data_guard: Option<Arc<SequencingDataGuard>>,
+    /// Hydration's protocol roles from `config.hydration`; `None` keeps pool order.
+    hydration: Option<ProtocolRoles>,
+}
+
+impl<Pool, Client, Evm> EezRuntimePayloadBuilder<Pool, Client, Evm> {
+    /// The builder for the L2 chain `spec`, with the shared gas limit and extra
+    /// data, and Hydration's protocol roles when `spec` has a `config.hydration`.
+    ///
+    /// # Errors
+    ///
+    /// A present but malformed or invalid `config.hydration`: the node refuses to
+    /// start rather than order Live blocks under stock rules.
+    pub(crate) fn new(
+        spec: &impl reth_chainspec::EthChainSpec<Header = alloy_consensus::Header>,
+        client: Client,
+        pool: Pool,
+        evm_config: Evm,
+        data_guard: Option<Arc<SequencingDataGuard>>,
+    ) -> eyre::Result<Self> {
+        Ok(Self {
+            pool,
+            client,
+            evm_config,
+            config: EthereumBuilderConfig::new()
+                .with_gas_limit(BUILDER_GAS_LIMIT)
+                .with_extra_data(Bytes::from_static(BUILDER_EXTRA_DATA)),
+            data_guard,
+            hydration: hydration_node::protocol_roles(spec)?,
+        })
+    }
+
+    /// A Live block's candidates in the pool's `best` order, with Hydration's
+    /// protocol transactions moved ahead when the chain has roles. The DA budget
+    /// wraps the result, so it cannot defer a protocol transaction before the
+    /// reordering sees it; the history update, if any, was already executed first.
+    pub(crate) fn ordered<T: PoolTransaction>(
+        &self,
+        best: PoolTransactions<T>,
+    ) -> PoolTransactions<T> {
+        hydration_node::order_pool_transactions(self.hydration, best)
+    }
 }
 
 impl<Pool, Client, Evm> PayloadBuilder for EezRuntimePayloadBuilder<Pool, Client, Evm>
@@ -228,7 +272,7 @@ where
             self.config.clone(),
             args,
             |attrs| {
-                let transactions = self.pool.best_transactions_with_attributes(attrs);
+                let transactions = self.ordered(self.pool.best_transactions_with_attributes(attrs));
                 match limit {
                     None => transactions,
                     Some(limit) => Box::new(DaTransactions {
@@ -435,11 +479,16 @@ mod tests {
     }
 
     fn tx(sender: u64, nonce: u64, bytes: usize) -> Tx {
+        tx_with_input(sender, nonce, vec![0xff; bytes])
+    }
+
+    fn tx_with_input(sender: u64, nonce: u64, input: Vec<u8>) -> Tx {
+        let bytes = input.len();
         let transaction = TransactionSigned::new_unhashed(
             Transaction::Legacy(TxLegacy {
                 chain_id: Some(sender),
                 nonce,
-                input: vec![0xff; bytes].into(),
+                input: input.into(),
                 to: TxKind::Call(Address::ZERO),
                 gas_limit: 1_000_000,
                 ..Default::default()
@@ -544,5 +593,61 @@ mod tests {
             BlockDaSizer::new(BUILDER_EXTRA_DATA).item_bytes().unwrap(),
         );
         assert!(empty.next().is_none());
+    }
+
+    /// The constructor reads the roles from the chain's genesis and the Live-block
+    /// candidates go through them; without the section the pool order stands.
+    #[test]
+    fn runtime_builder_orders_protocol_transactions_only_with_the_section() {
+        use hydration_node::rules::ORACLE_UPDATE_SELECTOR;
+
+        let sender = |id: u64| Address::from_word(U256::from(id).into());
+        let spec = |section: Option<serde_json::Value>| {
+            let mut genesis: alloy_genesis::Genesis =
+                serde_json::from_slice(include_bytes!("../../../genesis.json")).unwrap();
+            if let Some(section) = section {
+                genesis
+                    .config
+                    .extra_fields
+                    .insert(hydration_config::GENESIS_FIELD.into(), section);
+            }
+            reth_chainspec::ChainSpec::from_genesis(genesis)
+        };
+        let (oracle, keeper, user) = (
+            tx_with_input(1, 0, ORACLE_UPDATE_SELECTOR.to_vec()),
+            tx_with_input(2, 0, Vec::new()),
+            tx_with_input(3, 0, vec![0xde, 0xad]),
+        );
+        let order = |section: Option<serde_json::Value>| {
+            let builder = EezRuntimePayloadBuilder::new(&spec(section), (), (), (), None).unwrap();
+            builder
+                .ordered(Box::new(Candidates {
+                    queue: [user.clone(), keeper.clone(), oracle.clone()].into(),
+                    blocked: HashSet::new(),
+                    excluded: Arc::default(),
+                }))
+                .map(|tx| tx.sender())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(order(None), [sender(3), sender(2), sender(1)]);
+        let section = serde_json::json!({
+            "rulesVersion": 1,
+            "oracleUpdater": sender(1),
+            "peplKeeper": sender(2),
+        });
+        assert_eq!(order(Some(section)), [sender(1), sender(2), sender(3)]);
+        let error = EezRuntimePayloadBuilder::<(), (), ()>::new(
+            &spec(Some(serde_json::Value::Null)),
+            (),
+            (),
+            (),
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("malformed config.hydration"),
+            "{error}"
+        );
     }
 }

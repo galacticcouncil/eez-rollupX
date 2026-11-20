@@ -81,6 +81,9 @@ const BEACON_FIXTURE_SECONDS_PER_SLOT: u64 = 1;
 
 // Consumed by the launcher as `--chain`; never forwarded to `eez-node`.
 const TEST_L2_GENESIS_ENV: &str = "EEZ_TEST_L2_GENESIS_PATH";
+// Consumed while writing the cross-chain fixture's L2 genesis; never forwarded
+// to `eez-node`. See `setup_cross_chain_with_hydration`.
+const HYDRATION_ROLES_ENV: &str = "EEZ_TEST_HYDRATION_ROLES";
 
 const TX_SPAM_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -1454,6 +1457,7 @@ impl NodeHandle {
             .env("EEZ_L2_RPC_URL", format!("http://127.0.0.1:{http_port}"));
         for (k, v) in env {
             if *k == TEST_L2_GENESIS_ENV
+                || *k == HYDRATION_ROLES_ENV
                 || *k == "EEZ_TEST_L2_GENESIS_AGE_SECONDS"
                 || *k == REJECTING_BUILDER_ENV
                 || *k == POST_BATCHER_ENV
@@ -2770,6 +2774,17 @@ sol! {
         function lastValue() external view returns (uint256);
         function setValue(uint256 next) external payable returns (uint256);
     }
+    /// `contracts/src/CounterRelay.sol`: bumps Hydration's counter precompile and
+    /// pushes the new count to an L1 `Value` through its L2 cross-chain proxy.
+    #[sol(rpc)]
+    interface ICounterRelay {
+        event Relayed(uint256 count, bool changed, uint256 l1Value);
+        function proxy() external view returns (address);
+        function bumpAndRelay() external;
+        function relayed() external view returns (uint256);
+        function lastCount() external view returns (uint256);
+        function lastChanged() external view returns (bool);
+    }
     #[sol(rpc)]
     interface ISetterWrapper {
         function readWriteRead(uint256 v) external;
@@ -2952,6 +2967,62 @@ pub fn bind_l2_genesis_reference(
         .storage = Some(eez_protocol::l1_history::genesis_storage());
     let spec = reth_chainspec::ChainSpec::from_genesis(genesis.clone());
     eez_protocol::l2::Schedule::new(config, spec.genesis_header())?;
+    std::fs::write(path, serde_json::to_vec(&genesis)?)?;
+    Ok(())
+}
+
+/// Add Hydration's `config.hydration` section and its counter account to a new
+/// fixture L2 genesis, before the reference is bound and the rollup registered.
+///
+/// `roles` is `<oracleUpdater>,<peplKeeper>`. The section is checked with the
+/// same decoder as every runtime role, so a malformed fixture fails here rather
+/// than as a startup error in one of the spawned processes.
+fn add_hydration_section(path: &Path, roles: &str) -> Result<()> {
+    let (oracle_updater, pepl_keeper) = roles
+        .split_once(',')
+        .with_context(|| format!("{HYDRATION_ROLES_ENV} must be <oracleUpdater>,<peplKeeper>"))?;
+    let oracle_updater: Address = oracle_updater
+        .trim()
+        .parse()
+        .context("Hydration oracle updater address")?;
+    let pepl_keeper: Address = pepl_keeper
+        .trim()
+        .parse()
+        .context("Hydration PEPL keeper address")?;
+    let section = serde_json::json!({
+        "rulesVersion": hydration_config::RULES_VERSION_1,
+        "oracleUpdater": oracle_updater,
+        "peplKeeper": pepl_keeper,
+    });
+    hydration_config::HydrationConfig::decode(&section)
+        .map_err(|error| anyhow!("fixture section: {error}"))?;
+    let mut genesis: alloy_genesis::Genesis = serde_json::from_slice(&std::fs::read(path)?)?;
+    ensure!(
+        !genesis
+            .config
+            .extra_fields
+            .contains_key(hydration_config::GENESIS_FIELD),
+        "fixture base already carries config.hydration"
+    );
+    ensure!(
+        !genesis
+            .alloc
+            .contains_key(&hydration_config::COUNTER_ADDRESS),
+        "Hydration counter address already allocated"
+    );
+    genesis
+        .config
+        .extra_fields
+        .insert(hydration_config::GENESIS_FIELD.into(), section);
+    // The counter writes storage at its own address; nonce 1 keeps the account
+    // non-empty under EIP-161 from block zero (see `HydrationConfig::check_counter_seed`).
+    genesis.alloc.insert(
+        hydration_config::COUNTER_ADDRESS,
+        alloy_genesis::GenesisAccount {
+            nonce: Some(1),
+            ..Default::default()
+        },
+    );
     std::fs::write(path, serde_json::to_vec(&genesis)?)?;
     Ok(())
 }
@@ -3563,6 +3634,32 @@ pub async fn deploy_setter_wrapper(
         ISetterWrapper::setSameValueTwiceCall::SELECTOR,
     )?;
     deploy_raw(rpc_url, key, chain_id, &artifact, proxy.abi_encode()).await
+}
+
+/// Deploy `CounterRelay` on the L2 for `proxy` (the L2 proxy of an L1 `Value`)
+/// and wait until Composer has a parent that contains it.
+///
+/// Like any outbound fixture, the deployment receipt alone is not a hand-off
+/// boundary; `wait_for_outbound_fixture_parent` reads the relay's `proxy()`
+/// getter, which has the same signature as `SetterWrapper`'s.
+pub async fn deploy_counter_relay(
+    rpc_url: &str,
+    key: &str,
+    chain_id: u64,
+    proxy: Address,
+    node: &NodeHandle,
+) -> Result<Address> {
+    let artifact = repo_root().join("contracts/out/CounterRelay.sol/CounterRelay.json");
+    // A renamed entry point would otherwise deploy fine and fail later as an
+    // opaque revert.
+    require_artifact_method(
+        &artifact,
+        "bumpAndRelay()",
+        ICounterRelay::bumpAndRelayCall::SELECTOR,
+    )?;
+    let relay = deploy_raw(rpc_url, key, chain_id, &artifact, proxy.abi_encode()).await?;
+    wait_for_outbound_fixture_parent(node, rpc_url, relay, proxy).await?;
+    Ok(relay)
 }
 
 /// Check the deployed fixture and let one complete Sync interval pass. Ordinary
@@ -5690,6 +5787,30 @@ pub async fn setup_cross_chain_with_env(
     .await
 }
 
+/// Start the shared fixture on a Hydration network: the L2 genesis carries
+/// `config.hydration` with these role accounts, plus the counter account the
+/// section requires. The Composer node and the proof signer both load that
+/// genesis, so the counter precompile and the protocol-transaction prefix apply
+/// to production, simulation, consensus and proving alike.
+///
+/// Role accounts must not be the fixture's own L2 senders (`TARGET_DEPLOYER`,
+/// `OUTBOUND_USER`): every keeper transaction is a protocol transaction, which
+/// the ordering rule and the L2 cross-chain front treat differently.
+///
+/// `extra_env` is passed on as for `setup_cross_chain_with_env`.
+pub async fn setup_cross_chain_with_hydration(
+    oracle_updater: Address,
+    pepl_keeper: Address,
+    extra_env: &[(&'static str, String)],
+) -> Result<CrossChainWorld> {
+    let mut env = vec![(
+        HYDRATION_ROLES_ENV,
+        format!("{oracle_updater},{pepl_keeper}"),
+    )];
+    env.extend_from_slice(extra_env);
+    setup_cross_chain_with_env(&env).await
+}
+
 pub async fn setup_cross_chain_with_profile(
     profile: NativeL1Profile,
     extra_env: &[(&'static str, String)],
@@ -6166,6 +6287,13 @@ async fn setup_native_inner(
             },
         );
         std::fs::write(&cfg.l2_genesis.0, serde_json::to_vec(&genesis)?)?;
+    }
+    if let Some((_, roles)) = extra_env
+        .iter()
+        .rev()
+        .find(|(name, _)| *name == HYDRATION_ROLES_ENV)
+    {
+        add_hydration_section(&cfg.l2_genesis.0, roles)?;
     }
     // Fee/history variants change the reference hash. Finalize the reference
     // before exporting fixtures, starting the signer or registering L2.

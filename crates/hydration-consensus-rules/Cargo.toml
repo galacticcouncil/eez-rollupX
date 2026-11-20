@@ -1,8 +1,10 @@
-# Vendored from galacticcouncil/hydration-zisk `crates/hydration-consensus-rules`.
-# `src/` must stay byte-identical to that crate (check with `diff -r`): Hydreth,
-# its ZisK guest and this chain must classify protocol transactions the same way.
-# Only this manifest differs. It keeps the source crate's licence instead of
-# inheriting this workspace's.
+# Vendored from galacticcouncil/hydration-zisk `crates/hydration-consensus-rules`
+# and extended with genesis-configured `ProtocolRoles` and a skip of one leading
+# EEZ `0x46` history transaction. The role-free functions keep that crate's
+# signatures and verdicts (exhaustive tests compare them with the original rule),
+# so Hydreth, its ZisK guest and this chain classify a block the same way under
+# the legacy roles. Port rule changes to both copies. This manifest keeps the
+# source crate's licence instead of inheriting this workspace's.
 [package]
 name                   = "hydration-consensus-rules"
 version.workspace      = true

@@ -34,6 +34,8 @@ eez-evm.workspace = true
 eez-l1 = { workspace = true, features = ["chain-spec"] }
 prost.workspace = true
 eez-protocol.workspace = true
+# Writes Hydration's optional `config.hydration` section into fixture genesis.
+hydration-config.workspace = true
 reth-chainspec.workspace = true
 reth-db.workspace = true
 reth_gnosis.workspace = true

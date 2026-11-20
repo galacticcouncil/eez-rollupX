@@ -2,9 +2,11 @@
 
 use alloy_eips::eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE};
 use alloy_genesis::Genesis;
+use eez_primitives::SYSTEM_ADDRESS;
 use eez_protocol::l2::{
     BASE_FEE_PARAMS, GENESIS_BASE_FEE, ProfileError, Schedule, validate_header,
 };
+use hydration_config::{HydrationConfig, SeedAccount};
 use reth_chainspec::{ChainSpec, EthChainSpec};
 
 /// Decode the one required genesis derivation profile. There is no legacy or
@@ -21,6 +23,60 @@ pub fn schedule(
     let config = serde_json::from_value(supplied.clone())
         .map_err(|_| ProfileError("invalid config.rollupX derivation parameters"))?;
     Schedule::new(config, spec.genesis_header())
+}
+
+/// Rejection reason for a `config.hydration` role held by [`SYSTEM_ADDRESS`].
+pub(crate) const HYDRATION_SYSTEM_ROLE: &str =
+    "config.hydration oracleUpdater or peplKeeper is the EEZ system address";
+
+/// Decode Hydration's optional `config.hydration` section; the `hydration-config`
+/// crate owns its format and rules. `Ok(None)` means stock RollupX rules. Only the
+/// rollup execution layer reads it; L1 simulation never does. The ordering rule
+/// reads its role addresses through here too (`hydration-node`, for the node's
+/// consensus and payload builder, the L2 cross-chain front and the proof signer).
+///
+/// A role held by [`SYSTEM_ADDRESS`] is rejected: native `0x45`/`0x46` transactions
+/// recover to it, so the ordering rule would classify them as protocol transactions,
+/// and the pool never admits a transaction from it.
+pub fn hydration(
+    spec: &impl EthChainSpec<Header = alloy_consensus::Header>,
+) -> Result<Option<HydrationConfig>, ProfileError> {
+    let config = HydrationConfig::from_genesis_section(
+        spec.genesis()
+            .config
+            .extra_fields
+            .get(hydration_config::GENESIS_FIELD),
+    )
+    .map_err(|error| ProfileError(error.reason()))?;
+    if config.is_some_and(|config| {
+        config.oracle_updater() == SYSTEM_ADDRESS || config.pepl_keeper() == SYSTEM_ADDRESS
+    }) {
+        return Err(ProfileError(HYDRATION_SYSTEM_ROLE));
+    }
+    Ok(config)
+}
+
+/// A present `config.hydration` requires its counter account in alloc.
+fn validate_hydration_seed(spec: &ChainSpec) -> Result<(), ProfileError> {
+    let Some(hydration) = hydration(spec)? else {
+        return Ok(());
+    };
+    let seed = spec
+        .genesis()
+        .alloc
+        .get(&hydration_config::COUNTER_ADDRESS)
+        .map(|account| SeedAccount {
+            nonce: account.nonce,
+            balance: account.balance,
+            has_code: account.code.as_ref().is_some_and(|code| !code.is_empty()),
+            has_storage: account
+                .storage
+                .as_ref()
+                .is_some_and(|storage| !storage.is_empty()),
+        });
+    hydration
+        .check_counter_seed(seed)
+        .map_err(|error| ProfileError(error.reason()))
 }
 
 pub(crate) fn validate_next(
@@ -70,7 +126,8 @@ pub(crate) fn validate_payload(
 /// Construct the L2 specification used by consensus, execution and replay.
 /// Reth's generic genesis conversion always installs Ethereum's `2/8` fee
 /// parameters; RollupX instead has the fixed `2/50` rule. No supplied configurable
-/// fee rule is overwritten. Invalid genesis fields are rejected, not normalized.
+/// fee rule is overwritten. Invalid genesis fields are rejected, not normalized,
+/// including a malformed `config.hydration` or one without its alloc seed.
 ///
 /// This constructor is never used for L1 Ethereum or Gnosis configuration.
 pub fn chain_spec(genesis: Genesis) -> Result<ChainSpec, ProfileError> {
@@ -148,6 +205,7 @@ pub fn chain_spec(genesis: Genesis) -> Result<ChainSpec, ProfileError> {
         ));
     }
     validate_history_implementation_and_admin(spec.genesis())?;
+    validate_hydration_seed(&spec)?;
     spec.base_fee_params = BASE_FEE_PARAMS.into();
     Ok(spec)
 }

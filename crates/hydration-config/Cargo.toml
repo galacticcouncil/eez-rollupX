@@ -1,0 +1,19 @@
+[package]
+name                   = "hydration-config"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+rust-version.workspace = true
+description            = "Hydration's optional `config.hydration` L2 genesis section: rules version and protocol role addresses."
+
+# serde + alloy-primitives only: genesis loaders (eez-l1) depend on this crate
+# and must not link evm2 or the counter precompile.
+[dependencies]
+alloy-primitives = { workspace = true, features = ["serde"] }
+serde.workspace  = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

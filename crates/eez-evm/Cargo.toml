@@ -29,6 +29,8 @@ reth-trie-common = { workspace = true, optional = true }
 stateless-reth = { workspace = true, optional = true }
 stateless-tries = { workspace = true, optional = true }
 serde_json.workspace = true
+hydration-config.workspace = true
+hydration-precompiles.workspace = true
 
 [dev-dependencies]
 alloy-rlp.workspace = true

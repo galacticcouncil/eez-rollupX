@@ -37,10 +37,19 @@ pub struct EezBlockExecutorFactory<C> {
 impl<C: reth_chainspec::EthChainSpec<Header = alloy_consensus::Header>> EezBlockExecutorFactory<C> {
     pub fn new(spec: Arc<C>, layer: ExecutionLayer) -> Self {
         let evm = match layer {
-            ExecutionLayer::Rollup => EezEvmFactory {
-                collector: crate::profile::schedule(spec.as_ref())
-                    .map(|schedule| Some(schedule.config().fee_collector)),
-            },
+            ExecutionLayer::Rollup => {
+                // A malformed `config.hydration` fails closed like a malformed
+                // `config.rollupX`: the collector error rejects every block and
+                // transaction instead of executing them under stock rules.
+                let hydration = crate::profile::hydration(spec.as_ref());
+                EezEvmFactory {
+                    collector: hydration.and_then(|_| {
+                        crate::profile::schedule(spec.as_ref())
+                            .map(|schedule| Some(schedule.config().fee_collector))
+                    }),
+                    hydration: hydration.ok().flatten(),
+                }
+            }
             ExecutionLayer::L1Simulation => EezEvmFactory::for_l1_simulation(),
         };
         Self {

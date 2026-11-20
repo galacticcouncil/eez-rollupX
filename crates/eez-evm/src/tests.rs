@@ -1223,3 +1223,217 @@ fn block_admission_rejects_unsupported_native_selectors() {
         ensure_supported_transaction(&tx).unwrap();
     }
 }
+
+/// Hydration's `config.hydration` genesis section: rollup layer only, fail closed.
+mod hydration_genesis {
+    use super::*;
+    use eez_protocol::l2::ProfileError;
+    use hydration_config::{COUNTER_ADDRESS, HydrationConfig, HydrationConfigError};
+    use reth_evm::{BlockExecutor as _, BlockExecutorFactory as _, Evm as _};
+
+    const ORACLE: Address = Address::repeat_byte(0xa1);
+    const KEEPER: Address = Address::repeat_byte(0xb2);
+    const MALFORMED: &str = "malformed config.hydration";
+
+    fn base_genesis() -> alloy_genesis::Genesis {
+        config().chain_spec().genesis().clone()
+    }
+    fn hydration_genesis() -> alloy_genesis::Genesis {
+        let mut genesis = base_genesis();
+        genesis.config.extra_fields.insert(
+            hydration_config::GENESIS_FIELD.into(),
+            serde_json::json!({ "rulesVersion": 1, "oracleUpdater": ORACLE, "peplKeeper": KEEPER }),
+        );
+        genesis.alloc.insert(
+            COUNTER_ADDRESS,
+            alloy_genesis::GenesisAccount::default().with_nonce(Some(1)),
+        );
+        genesis
+    }
+    fn section(genesis: &mut alloy_genesis::Genesis) -> &mut serde_json::Value {
+        genesis
+            .config
+            .extra_fields
+            .get_mut(hydration_config::GENESIS_FIELD)
+            .unwrap()
+    }
+    fn seed(genesis: &mut alloy_genesis::Genesis) -> &mut alloy_genesis::GenesisAccount {
+        genesis.alloc.get_mut(&COUNTER_ADDRESS).unwrap()
+    }
+    fn env() -> EthEvmEnv<EezEvmTypes> {
+        EthEvmEnv::new(
+            evm2::SpecId::OSAKA,
+            evm2::env::BlockEnv::<EezEvmTypes> {
+                number: U256::ONE,
+                timestamp: U256::ONE,
+                gas_limit: U256::from(30_000_000),
+                ..Default::default()
+            },
+            1,
+        )
+    }
+
+    #[test]
+    fn hydration_section_selects_the_rules_on_the_rollup_layer_only() {
+        let spec = Arc::new(profile::chain_spec(hydration_genesis()).unwrap());
+        let expected = HydrationConfig::new(1, ORACLE, KEEPER).unwrap();
+        assert_eq!(profile::hydration(spec.as_ref()), Ok(Some(expected)));
+        let rollup = EezEvmConfig::new(spec.clone());
+        let l1 = EezEvmConfig::for_l1_simulation(spec.clone());
+        let factory = rollup.block_executor_factory().evm_factory();
+        assert_eq!(factory.hydration, Some(expected));
+        assert_eq!(factory.collector, Ok(Some(FEE_COLLECTOR)));
+        assert_eq!(l1.block_executor_factory().evm_factory().hydration, None);
+        let evm = rollup
+            .block_executor_factory()
+            .evm_with_env(InMemoryDB::default(), env());
+        assert!(evm.has_precompile(&COUNTER_ADDRESS));
+        let evm = l1
+            .block_executor_factory()
+            .evm_with_env(InMemoryDB::default(), env());
+        assert!(!evm.has_precompile(&COUNTER_ADDRESS));
+
+        // Absent section: stock rules.
+        let stock = EezEvmConfig::new(Arc::new(profile::chain_spec(base_genesis()).unwrap()));
+        assert_eq!(profile::hydration(stock.chain_spec().as_ref()), Ok(None));
+        assert_eq!(stock.block_executor_factory().evm_factory().hydration, None);
+        let evm = stock
+            .block_executor_factory()
+            .evm_with_env(InMemoryDB::default(), env());
+        assert!(!evm.has_precompile(&COUNTER_ADDRESS));
+
+        // The seed changes the genesis hash relative to the stock template, but it does
+        // not bind the rules: the same seed without the section gives the same genesis
+        // hash (so the same NetworkProfile and vkey) while running stock rules. Only the
+        // document digest (validation identity) tells them apart.
+        assert_ne!(
+            spec.genesis_hash(),
+            profile::chain_spec(base_genesis()).unwrap().genesis_hash()
+        );
+        let mut seeded_stock = base_genesis();
+        seeded_stock.alloc.insert(
+            COUNTER_ADDRESS,
+            alloy_genesis::GenesisAccount::default().with_nonce(Some(1)),
+        );
+        let seeded_stock = EezEvmConfig::new(Arc::new(profile::chain_spec(seeded_stock).unwrap()));
+        assert_eq!(
+            seeded_stock.chain_spec().genesis_hash(),
+            spec.genesis_hash()
+        );
+        assert_eq!(
+            seeded_stock
+                .block_executor_factory()
+                .evm_factory()
+                .hydration,
+            None
+        );
+    }
+
+    #[test]
+    fn malformed_invalid_or_unseeded_hydration_genesis_is_rejected_with_its_reason() {
+        profile::chain_spec(hydration_genesis()).unwrap();
+        let cases: &[(fn(&mut alloy_genesis::Genesis), &str)] = &[
+            (|g| *section(g) = serde_json::Value::Null, MALFORMED),
+            (|g| *section(g) = serde_json::json!({}), MALFORMED),
+            (|g| section(g)["unknown"] = true.into(), MALFORMED),
+            (|g| section(g)["rulesVersion"] = "1".into(), MALFORMED),
+            (
+                |g| section(g)["rulesVersion"] = 2.into(),
+                HydrationConfigError::UnsupportedRulesVersion.reason(),
+            ),
+            (
+                |g| section(g)["oracleUpdater"] = serde_json::json!(Address::ZERO),
+                HydrationConfigError::ZeroOracleUpdater.reason(),
+            ),
+            (
+                |g| section(g)["peplKeeper"] = serde_json::json!(Address::ZERO),
+                HydrationConfigError::ZeroPeplKeeper.reason(),
+            ),
+            (
+                |g| section(g)["peplKeeper"] = serde_json::json!(ORACLE),
+                HydrationConfigError::OracleUpdaterIsPeplKeeper.reason(),
+            ),
+            (
+                |g| section(g)["oracleUpdater"] = serde_json::json!(SYSTEM_ADDRESS),
+                profile::HYDRATION_SYSTEM_ROLE,
+            ),
+            (
+                |g| section(g)["peplKeeper"] = serde_json::json!(SYSTEM_ADDRESS),
+                profile::HYDRATION_SYSTEM_ROLE,
+            ),
+            (
+                |g| {
+                    g.alloc.remove(&COUNTER_ADDRESS);
+                },
+                HydrationConfigError::MissingCounterSeed.reason(),
+            ),
+            (
+                |g| seed(g).nonce = None,
+                HydrationConfigError::InvalidCounterSeed.reason(),
+            ),
+            (
+                |g| seed(g).nonce = Some(2),
+                HydrationConfigError::InvalidCounterSeed.reason(),
+            ),
+            (
+                |g| seed(g).balance = U256::from(1),
+                HydrationConfigError::InvalidCounterSeed.reason(),
+            ),
+            (
+                |g| seed(g).code = Some(Bytes::from_static(&[0x00])),
+                HydrationConfigError::InvalidCounterSeed.reason(),
+            ),
+            (
+                |g| seed(g).storage = Some([(B256::ZERO, B256::ZERO)].into()),
+                HydrationConfigError::InvalidCounterSeed.reason(),
+            ),
+        ];
+        for (index, (mutate, reason)) in cases.iter().enumerate() {
+            let mut invalid = hydration_genesis();
+            mutate(&mut invalid);
+            assert_eq!(
+                profile::chain_spec(invalid).unwrap_err(),
+                ProfileError(reason),
+                "case {index}"
+            );
+        }
+        // Empty code and storage fields are the same account state as absent ones.
+        let mut equivalent = hydration_genesis();
+        seed(&mut equivalent).code = Some(Bytes::new());
+        seed(&mut equivalent).storage = Some(Default::default());
+        profile::chain_spec(equivalent).unwrap();
+    }
+
+    #[test]
+    fn invalid_section_fails_closed_without_the_profile_loader() {
+        let mut genesis = hydration_genesis();
+        section(&mut genesis)["oracleUpdater"] = serde_json::json!(Address::ZERO);
+        // `ChainSpec::from_genesis` skips `profile::chain_spec`, as a tool or test might.
+        let rollup = EezEvmConfig::new(Arc::new(ChainSpec::from_genesis(genesis)));
+        let factory = rollup.block_executor_factory().evm_factory();
+        let reason = HydrationConfigError::ZeroOracleUpdater.reason();
+        assert_eq!(factory.hydration, None);
+        assert_eq!(
+            factory.collector,
+            Err(ProfileError(reason)),
+            "every block and transaction must fail, not run stock rules"
+        );
+        let evm = rollup
+            .block_executor_factory()
+            .evm_with_env(InMemoryDB::default(), env());
+        let mut executor = rollup.block_executor_factory().create_executor(
+            evm,
+            EthBlockExecutionCtx {
+                tx_count_hint: None,
+                parent_hash: B256::ZERO,
+                parent_beacon_block_root: Some(B256::ZERO),
+                ommers: &[],
+                withdrawals: Some(Cow::Borrowed(&[])),
+                extra_data: Bytes::new(),
+                slot_number: None,
+            },
+        );
+        let error = executor.apply_pre_execution_changes().unwrap_err();
+        assert!(error.to_string().contains(reason), "{error}");
+    }
+}

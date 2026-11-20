@@ -47,7 +47,7 @@ fn reconstruction_fact_is_built_only_from_exact_replay_outputs() {
             crate::testkit::checked_history(std::slice::from_ref(&input)).unwrap(),
         )))
         .unwrap();
-    let recovered = decode_match_and_recover_signers(&input, &backend.chain_spec).unwrap();
+    let recovered = backend.decode_and_recover(&input).unwrap();
     let block = recovered.clone().into_sealed_block().into_block();
     let mut output = stateless_validation_recovered(
         recovered,
@@ -145,7 +145,7 @@ fn nonempty_ordinary_terminal_skips_checkpoints_without_changing_execution() {
             crate::testkit::checked_history(std::slice::from_ref(&input)).unwrap(),
         )))
         .unwrap();
-    let decoded = decode_match_and_recover_signers(&input, &backend.chain_spec).unwrap();
+    let decoded = backend.decode_and_recover(&input).unwrap();
     assert!(
         !decoded.body().transactions.is_empty(),
         "empty blocks would not expose the regression"
@@ -582,6 +582,158 @@ fn sender_classification_uses_the_configured_system_address() {
     assert_eq!(
         system_sender_flags(&recovered, Address::repeat_byte(0xbb)),
         [false]
+    );
+}
+
+/// Configured Hydration roles for the tests below; not development-mnemonic
+/// keys, so a fallback to the legacy compiled-in roles would change the verdicts.
+fn hydration_role_keys() -> (
+    alloy_signer_local::PrivateKeySigner,
+    alloy_signer_local::PrivateKeySigner,
+) {
+    let key = |byte| alloy_signer_local::PrivateKeySigner::from_bytes(&B256::repeat_byte(byte));
+    (key(0xa1).unwrap(), key(0xb2).unwrap())
+}
+
+#[test]
+fn misplaced_protocol_transaction_is_rejected_before_stateless_execution() {
+    use hydration_node::rules::{ORACLE_UPDATE_SELECTOR, ORACLE_UPDATER_ADDRESS};
+
+    let (oracle, keeper) = hydration_role_keys();
+    let roles = Some(ProtocolRoles::new(oracle.address(), keeper.address()));
+    let transaction = |input: &'static [u8]| {
+        TxLegacy {
+            input: Bytes::from_static(input),
+            ..Default::default()
+        }
+        .into_signed(alloy_primitives::Signature::test_signature())
+        .into()
+    };
+    let block = |senders: Vec<Address>| {
+        RecoveredBlock::new_unhashed(
+            Block::new(
+                Header {
+                    number: 7,
+                    ..Default::default()
+                },
+                alloy_consensus::BlockBody {
+                    transactions: vec![transaction(&[]), transaction(&ORACLE_UPDATE_SELECTOR)],
+                    ..Default::default()
+                },
+            ),
+            senders,
+        )
+    };
+    let misplaced = block(vec![Address::ZERO, oracle.address()]);
+
+    let error = validate_protocol_rules(&misplaced, roles).unwrap_err();
+
+    assert!(matches!(
+        error,
+        ValidationError::Rejected(reason)
+            if reason.contains("block 7") && reason.contains("index 1")
+    ));
+    // A stock chain checks nothing; the compiled-in development oracle updater
+    // holds no role on a chain that configures its own.
+    validate_protocol_rules(&misplaced, None).unwrap();
+    validate_protocol_rules(&block(vec![Address::ZERO, ORACLE_UPDATER_ADDRESS]), roles).unwrap();
+}
+
+/// The roles reach the production backend from the chain document: the same
+/// streamed block is rejected for its protocol position only on the Hydration
+/// chain, before any replay, and fails later for an unrelated reason otherwise.
+#[test]
+fn hydration_genesis_roles_reach_the_backend_and_reject_before_replay() {
+    use hydration_node::rules::ORACLE_UPDATE_SELECTOR;
+
+    let (oracle, keeper) = hydration_role_keys();
+    let user = alloy_signer_local::PrivateKeySigner::from_bytes(&B256::repeat_byte(0x33)).unwrap();
+    let mut hydration_genesis = fixture_genesis();
+    hydration_genesis.config.extra_fields.insert(
+        "hydration".into(),
+        serde_json::json!({
+            "rulesVersion": 1,
+            "oracleUpdater": oracle.address(),
+            "peplKeeper": keeper.address(),
+        }),
+    );
+    hydration_genesis.alloc.insert(
+        alloy_primitives::address!("0000000000000000000000000000000000000800"),
+        alloy_genesis::GenesisAccount::default().with_nonce(Some(1)),
+    );
+    let chain_id = hydration_genesis.config.chain_id;
+    let signed = |key: &alloy_signer_local::PrivateKeySigner, input: &'static [u8]| {
+        let tx = TxLegacy {
+            chain_id: Some(chain_id),
+            gas_limit: 50_000,
+            gas_price: 1_000_000_000,
+            to: alloy_primitives::TxKind::Call(Address::repeat_byte(0x77)),
+            input: Bytes::from_static(input),
+            ..Default::default()
+        };
+        let signature = Signature::from(
+            key.credential()
+                .sign_prehash_recoverable(tx.signature_hash().as_slice())
+                .unwrap(),
+        );
+        TransactionSigned::from(tx.into_signed(signature))
+    };
+    // [0x46 history, user, oracle update]: the update follows an ordinary transaction.
+    let mut input = fixture_input();
+    let mut block: Block = alloy_rlp::decode_exact(&input.rlp).unwrap();
+    assert!(matches!(block.body.transactions.as_slice(), [tx] if tx.is_history()));
+    block.body.transactions.push(signed(&user, &[0xde, 0xad]));
+    block
+        .body
+        .transactions
+        .push(signed(&oracle, &ORACLE_UPDATE_SELECTOR));
+    input.rlp = alloy_rlp::encode(&block);
+    input.claimed_hash = block.header.hash_slow();
+
+    let hydration = Backend::new(hydration_genesis, TEST_SYSTEM_ADDRESS);
+    assert_eq!(
+        hydration.hydration_roles,
+        Some(ProtocolRoles::new(oracle.address(), keeper.address()))
+    );
+    let mut rejected = input.clone();
+    let state_items = rejected.witness.state.len();
+    let history = crate::testkit::checked_history(std::slice::from_ref(&rejected)).unwrap();
+    let error = hydration
+        .validate_blocks(
+            std::slice::from_mut(&mut rejected),
+            &CancellationToken::default(),
+            history,
+        )
+        .unwrap_err();
+    assert!(
+        matches!(&error, ValidationError::Rejected(reason) if reason.contains(&format!(
+            "block {} has invalid protocol transaction position at index 2",
+            block.header.number
+        ))),
+        "{error}"
+    );
+    // Replay takes the witness; the check runs before any block is replayed.
+    assert_eq!(rejected.witness.state.len(), state_items);
+
+    let stock = Backend::new(fixture_genesis(), TEST_SYSTEM_ADDRESS);
+    assert_eq!(stock.hydration_roles, None);
+    let error = stock.validate(&[input]).unwrap_err().to_string();
+    assert!(!error.contains("protocol transaction position"), "{error}");
+}
+
+#[test]
+fn malformed_hydration_section_never_reads_as_a_stock_chain() {
+    let mut genesis = fixture_genesis();
+    genesis
+        .config
+        .extra_fields
+        .insert("hydration".into(), serde_json::Value::Null);
+    let mut spec = ChainSpec::from_genesis(genesis);
+    spec.base_fee_params = eez_protocol::l2::BASE_FEE_PARAMS.into();
+    let error = Backend::from_chain_spec(spec, TEST_SYSTEM_ADDRESS, B256::ZERO).unwrap_err();
+    assert!(
+        error.to_string().contains("malformed config.hydration"),
+        "{error}"
     );
 }
 

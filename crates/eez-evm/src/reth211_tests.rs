@@ -23,6 +23,14 @@ const COLLECTOR: Address = Address::repeat_byte(0x44);
 const OBSERVER: Address = Address::repeat_byte(0x55);
 
 fn fixture(manager: Bytes) -> (EezEvmConfig, InMemoryDB) {
+    fixture_with_genesis(manager, |_| {})
+}
+/// `fixture` with a genesis edit applied before both the chain specification and the
+/// pre-state are derived from it.
+fn fixture_with_genesis(
+    manager: Bytes,
+    edit: impl FnOnce(&mut alloy_genesis::Genesis),
+) -> (EezEvmConfig, InMemoryDB) {
     let mut parent = B256::ZERO;
     let headers: Vec<Bytes> = [0, 1, 4, 5, 8, 9, 12]
         .into_iter()
@@ -69,6 +77,7 @@ fn fixture(manager: Bytes) -> (EezEvmConfig, InMemoryDB) {
     profile["historyUpdateOffset"] = serde_json::json!(2);
     genesis.alloc.get_mut(&HISTORY_ADDRESS).unwrap().storage =
         Some(eez_protocol::l1_history::genesis_storage());
+    edit(&mut genesis);
     let mut db = InMemoryDB::default();
     for (address, account) in &genesis.alloc {
         let info = AccountInfo::empty()

@@ -324,3 +324,146 @@ fn absent_system_value_group_replays_against_independent_terminal_trie() {
         Err(stateless_reth::validation::StatelessValidationError::PostStateRootMismatch { .. })
     ));
 }
+
+/// Hydration's counter (`config.hydration`) through the stateless closed-prefix replay:
+/// the 0x..0800 slot write must reach the trie, the checkpoint and the terminal root.
+#[test]
+fn hydration_counter_increment_replays_against_independent_terminal_trie() {
+    use hydration_config::COUNTER_ADDRESS;
+    let (config, db) = fixture_with_genesis(bytes!("00"), |genesis| {
+        genesis.config.extra_fields.insert(
+            hydration_config::GENESIS_FIELD.into(),
+            serde_json::json!({
+                "rulesVersion": 1,
+                "oracleUpdater": Address::repeat_byte(0xa1),
+                "peplKeeper": Address::repeat_byte(0xb2),
+            }),
+        );
+        genesis.alloc.insert(
+            COUNTER_ADDRESS,
+            alloy_genesis::GenesisAccount::default().with_nonce(Some(1)),
+        );
+    });
+    assert!(
+        db.cache
+            .accounts
+            .get(&COUNTER_ADDRESS)
+            .is_some_and(|info| info.as_ref().is_some_and(|info| info.nonce == 1)),
+        "the seeded counter account is part of the pre-state"
+    );
+    let (pre_root, nodes) = complete_state(&db);
+    let mut parent = parent(&config, 5);
+    parent.state_root = pre_root;
+    let fee = parent
+        .next_block_base_fee(eez_protocol::l2::BASE_FEE_PARAMS)
+        .unwrap();
+    // Intrinsic 21,000 + 4 nonzero calldata bytes at 16, then the counter's 200 base
+    // + 2,100 cold SLOAD + 5,000 SSTORE (the EIP-7623 floor, 21,160, is lower).
+    let gas_used = 21_000 + 4 * 16 + 200 + 2_100 + 5_000;
+    let txs: Vec<EezTxEnvelope> = vec![
+        TxLegacy {
+            chain_id: Some(901),
+            nonce: 0,
+            gas_limit: 100_000,
+            gas_price: u128::from(fee),
+            to: TxKind::Call(COUNTER_ADDRESS),
+            input: Bytes::copy_from_slice(&hydration_precompiles::SELECTOR_INCREMENT),
+            ..Default::default()
+        }
+        .into_signed(Signature::new(U256::ONE, U256::ONE, false))
+        .into(),
+    ];
+    let receipts = vec![eez_primitives::Receipt {
+        tx_type: eez_primitives::EezTxType::Ethereum(alloy_consensus::TxType::Legacy),
+        success: true,
+        cumulative_gas_used: gas_used,
+        logs: vec![],
+    }];
+    let mut unwritten = db.clone();
+    unwritten.insert_account_storage(
+        &alloy_eips::eip2935::HISTORY_STORAGE_ADDRESS,
+        &U256::ZERO,
+        &U256::from_be_bytes(parent.hash_slow().0),
+    );
+    let paid = U256::from(fee) * U256::from(gas_used);
+    let mut user = unwritten.get_account(&USER).unwrap().unwrap();
+    user.nonce = 1;
+    user.balance -= paid;
+    unwritten.insert_account_info(&USER, user);
+    unwritten.insert_account_info(&COLLECTOR, AccountInfo::empty().with_balance(paid));
+    for address in [SYSTEM_ADDRESS, EEZL2_ADDRESS] {
+        let mut info = unwritten.get_account(&address).unwrap().unwrap();
+        info.balance = U256::ZERO;
+        unwritten.insert_account_info(&address, info);
+    }
+    // The seeded nonce 1 is unchanged; slot 0 goes from 0 to 1.
+    let mut expected = unwritten.clone();
+    expected.insert_account_storage(&COUNTER_ADDRESS, &U256::ZERO, &U256::from(1));
+    let root = complete_state(&expected).0;
+    let header = Header {
+        number: 1,
+        timestamp: 5,
+        parent_hash: parent.hash_slow(),
+        gas_used,
+        base_fee_per_gas: Some(fee),
+        state_root: root,
+        transactions_root: alloy_consensus::proofs::calculate_transaction_root(&txs),
+        receipts_root: alloy_consensus::proofs::calculate_receipt_root(
+            &receipts
+                .iter()
+                .map(|r| r.with_bloom_ref())
+                .collect::<Vec<_>>(),
+        ),
+        ..parent.clone()
+    };
+    let block = eez_primitives::Block::new(
+        header,
+        alloy_consensus::BlockBody {
+            transactions: txs,
+            withdrawals: Some(Default::default()),
+            ..Default::default()
+        },
+    );
+    let witness = alloy_rpc_types_debug::ExecutionWitness {
+        state: nodes,
+        codes: db
+            .cache
+            .contracts
+            .values()
+            .map(Bytecode::original_bytes)
+            .collect(),
+        headers: vec![alloy_rlp::encode(&parent).into()],
+        ..Default::default()
+    };
+    let recovered = reth_primitives_traits::RecoveredBlock::new_unhashed(block.clone(), vec![USER]);
+    let out = crate::stateless::validate_with_closed_prefixes(
+        recovered,
+        witness.clone(),
+        config.chain_spec().clone(),
+        config.clone(),
+        &[0],
+    )
+    .unwrap();
+    assert_eq!(out.validation.post_state_root, root);
+    assert_eq!(
+        out.checkpoints.transaction_state_checkpoints[0].state_root,
+        root
+    );
+    assert_eq!(out.validation.execution_output.result.receipts, receipts);
+    // A root without the counter write (gas and fees otherwise identical) is rejected.
+    let wrong = complete_state(&unwritten).0;
+    assert_ne!(wrong, root);
+    let mut invalid = block;
+    invalid.header.state_root = wrong;
+    let invalid = reth_primitives_traits::RecoveredBlock::new_unhashed(invalid, vec![USER]);
+    assert!(matches!(
+        crate::stateless::validate_with_closed_prefixes(
+            invalid,
+            witness,
+            config.chain_spec().clone(),
+            config,
+            &[0]
+        ),
+        Err(stateless_reth::validation::StatelessValidationError::PostStateRootMismatch { .. })
+    ));
+}

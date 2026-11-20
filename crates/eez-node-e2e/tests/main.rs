@@ -14,6 +14,7 @@ mod derivable_operations;
 mod dynamic_admission;
 mod e2e;
 mod fee_quotes;
+mod hydration;
 mod kurtosis_policy_replay;
 mod l1_identity;
 mod native_system;

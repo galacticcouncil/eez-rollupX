@@ -27,6 +27,7 @@ use eez_protocol::settlement::{is_system_tx, pair_end_positions};
 use evm2::bytecode::Bytecode;
 use evm2::evm::AccountInfo;
 use evm2::evm::{CacheDB, Database, Db};
+use hydration_node::ProtocolRoles;
 use reth_chainspec::{ChainSpec, EthereumHardforks as _};
 use reth_primitives_traits::RecoveredBlock;
 use stateless_reth::validation::StatelessValidationError;
@@ -154,6 +155,9 @@ pub(crate) struct Backend {
     evm_config: EezEvmConfig,
     expected_l2_system_address: Address,
     chain_document_digest: B256,
+    /// Hydration's protocol roles from the chain document's `config.hydration`;
+    /// `None` for a stock chain, which skips the protocol-prefix check.
+    hydration_roles: Option<ProtocolRoles>,
     #[cfg(test)]
     pub(super) derivation_enabled: bool,
     #[cfg(test)]
@@ -198,11 +202,11 @@ impl Backend {
             ?genesis_timestamp,
             "stateless chain configuration details",
         );
-        Ok(Self::from_chain_spec(
+        Self::from_chain_spec(
             eez_evm::profile::chain_spec(genesis)?,
             expected_l2_system_address,
             chain_document_digest,
-        ))
+        )
     }
 
     #[cfg(test)]
@@ -211,26 +215,41 @@ impl Backend {
         let digest = keccak256(eez_l1::chain_config::canonicalize_chain_json(&document).unwrap());
         let mut spec = ChainSpec::from_genesis(genesis);
         spec.base_fee_params = eez_protocol::l2::BASE_FEE_PARAMS.into();
-        Self::from_chain_spec(spec, expected_l2_system_address, digest)
+        Self::from_chain_spec(spec, expected_l2_system_address, digest).unwrap()
     }
 
+    /// # Errors
+    ///
+    /// A present but malformed or invalid `config.hydration`; it never reads as
+    /// absent. `profile::chain_spec` already rejects one, so this only fails for a
+    /// spec built without it.
     fn from_chain_spec(
         spec: ChainSpec,
         expected_l2_system_address: Address,
         chain_document_digest: B256,
-    ) -> Self {
+    ) -> eyre::Result<Self> {
+        let hydration_roles = hydration_node::protocol_roles(&spec)?;
         let chain_spec = Arc::new(spec);
         let evm_config = EezEvmConfig::new(Arc::clone(&chain_spec));
-        Self {
+        Ok(Self {
             chain_spec,
             evm_config,
             expected_l2_system_address,
             chain_document_digest,
+            hydration_roles,
             #[cfg(test)]
             derivation_enabled: true,
             #[cfg(test)]
             checkpoint_replays: std::sync::atomic::AtomicUsize::new(0),
-        }
+        })
+    }
+
+    /// [`decode_match_and_recover_signers`] under this backend's chain rules.
+    fn decode_and_recover(
+        &self,
+        admitted: &AdmittedBlock,
+    ) -> Result<RecoveredBlock<Block>, ValidationError> {
+        decode_match_and_recover_signers(admitted, &self.chain_spec, self.hydration_roles)
     }
 
     #[cfg(test)]
@@ -269,7 +288,7 @@ impl Backend {
         let mut prepared_settling_block = blocks
             .last()
             .map(|admitted| {
-                let recovered_block = decode_match_and_recover_signers(admitted, &self.chain_spec)?;
+                let recovered_block = self.decode_and_recover(admitted)?;
                 let (checkpoint_plan, system_sender_flags) = CheckpointPlan::from_recovered_block(
                     &recovered_block,
                     self.expected_l2_system_address,
@@ -286,32 +305,31 @@ impl Backend {
             check_cancellation(cancellation, index, total_blocks)?;
             let block_started = Instant::now();
             let block_ordinal = index + 1;
-            let (recovered_block, checkpoint_plan, system_sender_flags) = if block_ordinal
-                == total_blocks
-            {
-                let prepared = prepared_settling_block.take().ok_or_else(|| {
-                    ValidationError::InternalInvariant(
-                        "prepared settling block unexpectedly missing".to_owned(),
+            let (recovered_block, checkpoint_plan, system_sender_flags) =
+                if block_ordinal == total_blocks {
+                    let prepared = prepared_settling_block.take().ok_or_else(|| {
+                        ValidationError::InternalInvariant(
+                            "prepared settling block unexpectedly missing".to_owned(),
+                        )
+                    })?;
+                    (
+                        prepared.block,
+                        // Ordinary (including empty) terminals use their fully
+                        // validated block hash as the ordinary-prefix commitment.
+                        // Only native effect boundaries need intermediate roots.
+                        prepared
+                            .system_sender_flags
+                            .iter()
+                            .any(|&native| native)
+                            .then_some(prepared.checkpoint_plan),
+                        prepared.system_sender_flags,
                     )
-                })?;
-                (
-                    prepared.block,
-                    // Ordinary (including empty) terminals use their fully
-                    // validated block hash as the ordinary-prefix commitment.
-                    // Only native effect boundaries need intermediate roots.
-                    prepared
-                        .system_sender_flags
-                        .iter()
-                        .any(|&native| native)
-                        .then_some(prepared.checkpoint_plan),
-                    prepared.system_sender_flags,
-                )
-            } else {
-                let recovered_block = decode_match_and_recover_signers(admitted, &self.chain_spec)?;
-                let system_sender_flags =
-                    system_sender_flags(&recovered_block, self.expected_l2_system_address);
-                (recovered_block, None, system_sender_flags)
-            };
+                } else {
+                    let recovered_block = self.decode_and_recover(admitted)?;
+                    let system_sender_flags =
+                        system_sender_flags(&recovered_block, self.expected_l2_system_address);
+                    (recovered_block, None, system_sender_flags)
+                };
             let block_number = recovered_block.header().number;
             let decoded_parent_hash = recovered_block.header().parent_hash;
             let timestamp = recovered_block.header().timestamp;
@@ -947,11 +965,13 @@ fn decode_and_match_stream_metadata(admitted: &AdmittedBlock) -> Result<Block, V
     Ok(block)
 }
 
-/// Exact-decode, match stream metadata, and recover transaction signers under
-/// the configured fork rules. Signer recovery is not execution validation.
+/// Exact-decode, match stream metadata, recover transaction signers under the
+/// configured fork rules and, on a Hydration chain, check the protocol prefix.
+/// Signer recovery is not execution validation.
 fn decode_match_and_recover_signers(
     admitted: &AdmittedBlock,
     chain_spec: &ChainSpec,
+    hydration_roles: Option<ProtocolRoles>,
 ) -> Result<RecoveredBlock<Block>, ValidationError> {
     let block = decode_and_match_stream_metadata(admitted)?;
     block.body.transactions.iter().try_for_each(|tx| {
@@ -960,11 +980,30 @@ fn decode_match_and_recover_signers(
         })
     })?;
     let number = block.header.number;
-    recover_block(block, chain_spec).map_err(|error| {
+    let recovered = recover_block(block, chain_spec).map_err(|error| {
         ValidationError::Rejected(format!(
             "block {number} transaction recovery failed: {error}",
         ))
-    })
+    })?;
+    validate_protocol_rules(&recovered, hydration_roles)?;
+    Ok(recovered)
+}
+
+/// Hydration's protocol-transaction prefix, enforced by the node's consensus on
+/// import. Stateless replay does not run that consensus, so the signer rejects a
+/// misplaced oracle update or keeper transaction here, before execution.
+/// Without roles (a stock chain) nothing is checked.
+fn validate_protocol_rules(
+    block: &RecoveredBlock<Block>,
+    hydration_roles: Option<ProtocolRoles>,
+) -> Result<(), ValidationError> {
+    match hydration_node::recovered_block_rule_violation(hydration_roles, block) {
+        None => Ok(()),
+        Some(index) => Err(ValidationError::Rejected(format!(
+            "block {} has invalid protocol transaction position at index {index}",
+            block.header().number,
+        ))),
+    }
 }
 
 /// Homestead (EIP-2) forbids high-s signatures, so enforce the low-s rule

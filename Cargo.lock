@@ -3310,6 +3310,8 @@ dependencies = [
  "eez-primitives",
  "eez-protocol",
  "evm2",
+ "hydration-config",
+ "hydration-precompiles",
  "reth-chainspec",
  "reth-evm",
  "reth-evm-ethereum",
@@ -3384,6 +3386,7 @@ dependencies = [
  "eez-protocol",
  "eyre",
  "fail",
+ "hydration-config",
  "reqwest 0.12.28",
  "reth-chainspec",
  "reth-ethereum-primitives",
@@ -3430,6 +3433,7 @@ dependencies = [
  "evm2",
  "eyre",
  "http-body-util",
+ "hydration-node",
  "hyper",
  "hyper-util",
  "jsonrpsee",
@@ -3481,6 +3485,8 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-trace",
+ "alloy-signer",
+ "alloy-signer-local",
  "alloy-transport",
  "clap",
  "dotenvy",
@@ -3494,6 +3500,8 @@ dependencies = [
  "evm2",
  "eyre",
  "futures-util",
+ "hydration-config",
+ "hydration-node",
  "jsonrpsee",
  "mimalloc",
  "reth-basic-payload-builder",
@@ -3569,6 +3577,9 @@ dependencies = [
  "eez-prover-client",
  "eez-testkit",
  "http-body-util",
+ "hydration-config",
+ "hydration-consensus-rules",
+ "hydration-precompiles",
  "hyper",
  "hyper-util",
  "prost",
@@ -3645,6 +3656,7 @@ dependencies = [
  "eyre",
  "getrandom 0.3.4",
  "hex",
+ "hydration-node",
  "prost",
  "reth-chain-state",
  "reth-chainspec",
@@ -3765,6 +3777,7 @@ dependencies = [
  "eez-primitives",
  "eez-protocol",
  "http-body-util",
+ "hydration-config",
  "hyper",
  "hyper-util",
  "jsonrpsee",
@@ -5045,6 +5058,51 @@ dependencies = [
  "subtle",
  "typenum",
  "zeroize",
+]
+
+[[package]]
+name = "hydration-config"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "hydration-consensus-rules"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+]
+
+[[package]]
+name = "hydration-node"
+version = "0.1.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-genesis",
+ "alloy-primitives",
+ "eez-evm",
+ "eez-primitives",
+ "eyre",
+ "hydration-config",
+ "hydration-consensus-rules",
+ "reth-chainspec",
+ "reth-consensus",
+ "reth-execution-types",
+ "reth-primitives-traits",
+ "reth-transaction-pool",
+ "serde_json",
+]
+
+[[package]]
+name = "hydration-precompiles"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "evm2",
+ "hydration-config",
 ]
 
 [[package]]

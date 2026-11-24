@@ -1,4 +1,5 @@
-//! The sole RollupX genesis extension. L1 documents retain their own strict schema.
+//! The L2 genesis extensions: RollupX's required `config.rollupX` and Hydration's
+//! optional `config.hydration`. L1 documents retain their own strict schema.
 
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, keccak256};
@@ -17,7 +18,8 @@ pub struct LoadedL2Genesis {
 }
 
 impl LoadedL2Genesis {
-    /// Includes the `config.rollupX` extension, before any spelling normalization.
+    /// Includes the `config.rollupX` and any `config.hydration` extension, before any
+    /// spelling normalization.
     pub const fn digest(&self) -> B256 {
         self.digest
     }
@@ -29,7 +31,7 @@ impl LoadedL2Genesis {
         self.derivation
     }
 
-    /// Keep the validated extension in the chain specification so all execution
+    /// Keep the validated extensions in the chain specification so all execution
     /// and reconstruction consumers observe the same genesis parameters.
     pub fn into_genesis(self) -> Genesis {
         self.genesis
@@ -42,10 +44,12 @@ pub fn load_l2_genesis(path: &std::path::Path) -> eyre::Result<LoadedL2Genesis> 
     parse_l2_genesis(&encoded).wrap_err("parse L2 genesis document")
 }
 
-/// Reject duplicate/unknown keys, absent or malformed derivation parameters and
-/// bare chain configurations. Nothing is defaulted from local timing settings.
-/// The digest commits to the complete original canonical document, not the
-/// temporary Ethereum-only view used to check the common fields.
+/// Reject duplicate/unknown keys, absent or malformed derivation parameters,
+/// a malformed or invalid `config.hydration` and bare chain configurations. Nothing
+/// is defaulted from local timing settings. The digest commits to the complete
+/// original canonical document, not the temporary Ethereum-only view used to check
+/// the common fields. The `config.hydration` alloc seed is checked when the
+/// genesis becomes a chain specification (`eez_evm::profile::chain_spec`).
 pub fn parse_l2_genesis(encoded: &[u8]) -> eyre::Result<LoadedL2Genesis> {
     let canonical = canonicalize_chain_json(encoded)?;
     let mut document: serde_json::Value = serde_json::from_slice(&canonical)?;
@@ -58,11 +62,23 @@ pub fn parse_l2_genesis(encoded: &[u8]) -> eyre::Result<LoadedL2Genesis> {
         .ok_or_else(|| eyre::eyre!("L2 genesis requires config.rollupX derivation parameters"))?;
     let derivation: DerivationConfig = serde_json::from_value(extension.clone())
         .wrap_err("invalid config.rollupX derivation parameters")?;
+    let hydration = config.remove(hydration_config::GENESIS_FIELD);
+    if let Some(section) = &hydration {
+        hydration_config::HydrationConfig::decode(section).map_err(eyre::Report::new)?;
+    }
     let (mut genesis, _) = parse_document_value(document)?;
     genesis
         .config
         .extra_fields
         .insert("rollupX".into(), extension);
+    // Reinsert the original value, not a re-encoding, so consumers decode exactly
+    // what the digest covers.
+    if let Some(section) = hydration {
+        genesis
+            .config
+            .extra_fields
+            .insert(hydration_config::GENESIS_FIELD.into(), section);
+    }
     Ok(LoadedL2Genesis {
         genesis,
         derivation,
@@ -160,5 +176,138 @@ mod tests {
             );
         }
         assert!(parse_l2_genesis(br#"{"chainId":1}"#).is_err());
+    }
+
+    fn hydration_document() -> serde_json::Value {
+        let mut doc = document();
+        doc["config"]["hydration"] = serde_json::json!({
+            "rulesVersion": 1,
+            "oracleUpdater": "0x00000000000000000000000000000000000000a1",
+            "peplKeeper": "0x00000000000000000000000000000000000000b2",
+        });
+        doc
+    }
+
+    #[test]
+    fn hydration_section_is_checked_retained_unchanged_and_digested() {
+        let doc = hydration_document();
+        let encoded = serde_json::to_vec(&doc).unwrap();
+        let loaded = parse_l2_genesis(&encoded).unwrap();
+        assert_eq!(
+            loaded.digest(),
+            keccak256(canonicalize_chain_json(&encoded).unwrap())
+        );
+        assert_ne!(
+            loaded.digest(),
+            parse_l2_genesis(&serde_json::to_vec(&document()).unwrap())
+                .unwrap()
+                .digest(),
+            "the section must change the document digest"
+        );
+        let mut changed = doc.clone();
+        changed["config"]["hydration"]["peplKeeper"] =
+            "0x00000000000000000000000000000000000000b3".into();
+        assert_ne!(
+            parse_l2_genesis(&serde_json::to_vec(&changed).unwrap())
+                .unwrap()
+                .digest(),
+            loaded.digest(),
+            "a role change must change the document digest"
+        );
+        let genesis = loaded.into_genesis();
+        assert_eq!(
+            genesis.config.extra_fields[hydration_config::GENESIS_FIELD],
+            doc["config"]["hydration"]
+        );
+        assert_eq!(
+            genesis.config.extra_fields["rollupX"],
+            doc["config"]["rollupX"]
+        );
+        assert!(
+            parse_chain_document_with_digest(&encoded).is_err(),
+            "L1 must not inherit this namespace"
+        );
+        // The retained section is what the rollup execution layer decodes.
+        let hydration =
+            eez_evm::profile::hydration(&reth_chainspec::ChainSpec::from_genesis(genesis))
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            (hydration.oracle_updater(), hydration.pepl_keeper()),
+            (
+                alloy_primitives::address!("00000000000000000000000000000000000000a1"),
+                alloy_primitives::address!("00000000000000000000000000000000000000b2"),
+            )
+        );
+    }
+
+    #[test]
+    fn malformed_or_invalid_hydration_sections_are_rejected_with_their_reason() {
+        let cases: &[(fn(&mut serde_json::Value), &str)] = &[
+            (
+                |v| v["config"]["hydration"] = serde_json::Value::Null,
+                "malformed config.hydration",
+            ),
+            (
+                |v| v["config"]["hydration"]["unknown"] = true.into(),
+                "unknown field `unknown`",
+            ),
+            (
+                |v| {
+                    v["config"]["hydration"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("peplKeeper");
+                },
+                "missing field `peplKeeper`",
+            ),
+            (
+                |v| v["config"]["hydration"]["rulesVersion"] = "1".into(),
+                "malformed config.hydration",
+            ),
+            (
+                |v| v["config"]["hydration"]["rulesVersion"] = 2.into(),
+                "unsupported config.hydration rulesVersion",
+            ),
+            (
+                |v| {
+                    v["config"]["hydration"]["oracleUpdater"] =
+                        serde_json::json!(alloy_primitives::Address::ZERO);
+                },
+                "config.hydration oracleUpdater is the zero address",
+            ),
+            (
+                |v| {
+                    v["config"]["hydration"]["peplKeeper"] =
+                        serde_json::json!(alloy_primitives::Address::ZERO);
+                },
+                "config.hydration peplKeeper is the zero address",
+            ),
+            (
+                |v| {
+                    v["config"]["hydration"]["peplKeeper"] =
+                        v["config"]["hydration"]["oracleUpdater"].clone();
+                },
+                "oracleUpdater and peplKeeper are the same account",
+            ),
+            (
+                |v| {
+                    let section = v["config"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("hydration")
+                        .unwrap();
+                    v["config"]["hydrationn"] = section;
+                },
+                "unsupported fields: `hydrationn`",
+            ),
+        ];
+        parse_l2_genesis(&serde_json::to_vec(&hydration_document()).unwrap()).unwrap();
+        for (mutate, reason) in cases {
+            let mut doc = hydration_document();
+            mutate(&mut doc);
+            let error = parse_l2_genesis(&serde_json::to_vec(&doc).unwrap()).unwrap_err();
+            assert!(format!("{error:#}").contains(reason), "{reason}: {error:#}");
+        }
     }
 }

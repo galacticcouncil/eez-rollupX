@@ -141,6 +141,14 @@ its Solidity implementation/tests and the applicable fork contract:
   in `eez-node-common`, request scheduling/ownership in `eez-composer`, runtime
   wiring in `eez-node`/`eez-follower`, the RPC contract in `eez-control-rpc`, and
   independent proof validation in `eez-proof-signer`.
+- Hydration's optional `config.hydration` genesis section (signer specification
+  §3) enables the counter precompile and the protocol-transaction prefix from
+  genesis; without it every hook is inert. Only the rollup-layer `EezEvmFactory`
+  installs the counter, so every L2 execution path must build its EVM with
+  `EezEvmConfig::new` from the L2 chain spec, while L1 simulations keep stock
+  precompiles. A new L2 path that bypasses it reads `0x…0800` as an empty account
+  and diverges from consensus. Keep the role-free API of the vendored
+  `hydration-consensus-rules` compatible with hydration-zisk (see its manifest).
 - Native operations V1 reuses completed static candidates; V0 historical replay
   retains per-observation rows. Bind the policy to the authenticated operations
   version, never to guessed table shape or a failed comparison. Upgrade readers
@@ -292,6 +300,7 @@ task authorization.
 | Signer or prover RPC | `cargo +1.96.0 test --locked -p eez-proof-signer -p eez-control-rpc -p eez-prover-client`; the signer contributor guide's checks; `cross_chain` process tests for rejection/status/signing changes |
 | Settlement/admission | Composer unit tests; relevant `eez-node-e2e` modules: `settlement_policy`, `settlement_policy_gas`, `settlement_policy_cost`, `dynamic_admission` |
 | Application fee quotes / SDK | Composer, L1 and node unit tests; `node sdk/l2-fees.test.mjs`; `eez-node-e2e` module `fee_quotes`. Validate advisory snapshots during pending settlement, bounded concurrent quotes, standalone admission floors, mixed FIFO packing and final native receipts. Mixed posts must bind the outbound-only cost reference to the exact final sources and L1 quote; outbound-only posts retain the whole-post cost/risk floor. L1 refunds cannot fund L2 admission. L1 batching selects the largest recoverable tip without a batch funding floor; missing/insufficient refunds are observation-only. Cover multi-source selection, continued service after missing payouts and idempotent/reorg-corrected refund metrics. For L1 collection require the [real builder refund exercise](testing/kurtosis/README.md#exercise-l1-builder-refunds); the development mempool adapter cannot validate ordered refunds. See also the [L2 fee exercise](testing/kurtosis/README.md#exercise-l2-settlement-fees). |
+| Hydration rules (`config.hydration`) | `cargo +1.96.0 test --locked -p hydration-config -p hydration-consensus-rules -p hydration-precompiles -p hydration-node`; affected hook tests in `eez-evm`, `eez-l1`, `eez-node-common`, `eez-node` and the signer; `eez-node-e2e` module `hydration` |
 | Queue, partial consumption, reorg/restart | Relevant `eez-node-e2e` modules: `partial_consumption`, `queue_liveness`, `queue_reorg`; `cross_chain` / `chained_interstate` when group semantics change |
 | Integration contracts | `forge fmt --check --root contracts`; `forge test --root contracts` |
 | Protocol pin or core-contract integration | Core tests below; `forge build --root eez-core-protocol`; `bash scripts/ci/run-protocol-anvil.sh`; affected fork/E2E checks |

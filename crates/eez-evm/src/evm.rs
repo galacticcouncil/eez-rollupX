@@ -394,17 +394,22 @@ pub(crate) mod tests;
 #[derive(Debug, Clone, Copy)]
 pub struct EezEvmFactory {
     pub(crate) collector: Result<Option<Address>, ProfileError>,
+    /// Hydration's rules from the genesis `config.hydration` section. Only the rollup
+    /// layer sets it (`EezBlockExecutorFactory::new`); L1 simulation is always stock.
+    pub(crate) hydration: Option<hydration_config::HydrationConfig>,
 }
 impl EezEvmFactory {
     pub fn for_rollup(collector: Address) -> Result<Self, ProfileError> {
         validate_fee_collector(collector)?;
         Ok(Self {
             collector: Ok(Some(collector)),
+            hydration: None,
         })
     }
     pub const fn for_l1_simulation() -> Self {
         Self {
             collector: Ok(None),
+            hydration: None,
         }
     }
 }
@@ -421,6 +426,16 @@ impl reth_evm_ethereum::EvmFactory for EezEvmFactory {
         *evm.ext_mut() = EezEvmExt {
             collector: self.collector,
         };
+    }
+    /// Reth builds every EVM from this table (plain, precompile-cached and reconfigured),
+    /// so every L2 execution path sees the same set. Hydration's counter keeps state:
+    /// `precompile_cache_policy` must stay at its `Disabled` default while it is installed.
+    fn precompiles(&self, spec: SpecId) -> evm2::Precompiles<Self::Types> {
+        let mut precompiles = evm2::Precompiles::base(spec);
+        if self.hydration.is_some() {
+            hydration_precompiles::install(&mut precompiles);
+        }
+        precompiles
     }
 }
 impl reth_evm::FromRecoveredTx<EezTxEnvelope> for EezEvmTx {

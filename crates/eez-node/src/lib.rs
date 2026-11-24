@@ -1021,6 +1021,9 @@ async fn launch_composer(
     };
 
     let l2_source_chain_id = chain_spec.chain().id();
+    // The node's consensus already started with the same roles, so a malformed
+    // section cannot reach here; read them before the spec moves to the deriver.
+    let hydration_roles = hydration_node::protocol_roles(chain_spec.as_ref())?;
     if metrics_enabled {
         queue_metrics::spawn(
             Arc::clone(&held_pool),
@@ -1083,6 +1086,7 @@ async fn launch_composer(
                 composer_methods,
                 Some(gas_estimator),
                 quotes,
+                hydration_roles,
             )
             .await
             .unwrap_or_else(|e| panic!("configured cross-chain front exited: {e:#}"));

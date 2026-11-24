@@ -16,6 +16,7 @@ required-features = ["chain-spec"]
 [dependencies]
 eez-blob-codec.workspace    = true
 eez-protocol.workspace      = true
+hydration-config.workspace  = true
 reth-chainspec = { workspace = true, optional = true }
 reth_gnosis = { workspace = true, optional = true }
 

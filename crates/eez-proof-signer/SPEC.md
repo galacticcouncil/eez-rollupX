@@ -230,6 +230,41 @@ The loader derives the canonical document digest and execution rules from the
 same read. The digest precedes spelling normalization/defaults; see the
 [identity contract](../eez-control-rpc/SPEC.md#21-validation-identity-and-capability-discovery).
 
+Besides `config.rollupX`, the L2 document MAY carry Hydration's optional
+`config.hydration` section. Without it the network runs exactly the rules in this
+specification. When present it MUST be the object
+`{"rulesVersion": 1, "oracleUpdater": "0x…", "peplKeeper": "0x…"}`:
+
+- Every field is required. Unknown or misspelled fields, `null`, arrays and
+  mistyped values are rejected, never normalized or treated as absent.
+- Each role is `0x` followed by exactly 40 hex digits, upper or lower case.
+- `rulesVersion` MUST be 1. Both roles MUST be nonzero, distinct and different
+  from `SYSTEM_ADDRESS`, to which native `0x45`/`0x46` transactions recover.
+- Genesis alloc MUST contain `0x0000000000000000000000000000000000000800` with
+  nonce 1 and no code, balance or storage. The counter precompile writes storage
+  there; nonce 1 keeps the account non-empty under EIP-161 from block zero.
+
+The loader rejects a malformed or invalid section at startup and retains the
+section unchanged, so the document digest covers it and its role addresses: two
+documents that differ only in the section have different validation identities.
+The section is not bound into `NetworkProfile` or the registered vkey. The same
+alloc without the section produces the same genesis hash and runs stock rules,
+so the identity digest, not the vkey, distinguishes the two rule sets.
+
+Rules version 1 changes the rollup execution layer only; L1 simulation never
+reads the section. It installs Hydration's counter precompile at the seeded
+address and enables the protocol-transaction prefix check of §6.1 for the two
+configured roles. There is no activation height: the section exists from
+genesis or not at all, and adding, removing or changing it creates a different
+network.
+
+A signer without Hydration support rejects a document carrying the section as an
+unknown extension, so it cannot share an identity with a Hydration-capable
+Composer. A Hydration-capable signer given a document without the section
+validates exactly as before. A Hydration network needs Hydration-capable
+Composer, followers and signers from creation. Rolling back to binaries without
+this support stops that network, since they refuse its genesis.
+
 
 The active deployment bindings are:
 
@@ -504,9 +539,31 @@ For every admitted block, the backend MUST:
 
 1. exact-decode the supplied consensus RLP with no trailing bytes;
 2. match the decoded number and parent hash to the admitted claims;
-3. recompute the block-header hash and match the admitted hash; and
+3. recompute the block-header hash and match the admitted hash;
 4. recover every transaction signer using the configured fork rules, including
-   the Homestead low-`s` rule when active.
+   the Homestead low-`s` rule when active; and
+5. when the chain document has a `config.hydration` section, check its
+   protocol-transaction prefix over the recovered signers.
+
+The prefix of step 5 is `[history?, oracle update?, keeper?]`, followed only by
+ordinary transactions:
+
+- `history` is one leading `0x46` history update. It is skipped once, and only
+  at index zero.
+- An oracle update is a transaction from `oracleUpdater` whose calldata starts
+  with `setAssetPrice(address,uint256)` (`0x51323f72`) or
+  `setAssetPrices(address[],uint256[])` (`0xecb1c85a`). The updater's other
+  transactions are ordinary.
+- A keeper transaction is any transaction from `peplKeeper`.
+- Native `0x45`/`0x46` transactions recover to `SYSTEM_ADDRESS`, which holds no
+  role.
+
+An oracle update or keeper transaction anywhere else rejects the block before
+Stateless execution consumes its witness. The rejection names the block number
+and absolute transaction index. The Composer and followers enforce the same rule
+in consensus on every Engine import, and the Composer's payload builder places
+protocol transactions accordingly. Stateless replay does not run that consensus,
+so the signer applies the rule itself. Without the section, step 5 checks nothing.
 
 Signer recovery alone is not execution validation.
 
@@ -1429,7 +1486,9 @@ A compatible implementation MUST test at least:
 - exact DA projection, sidecars, and mixed Sync-block reconstruction;
 - actionable outbound/inbound failure attribution, reference validation, and
   non-actionable fallback;
-- public-input vectors against the pinned Solidity formula; and
+- public-input vectors against the pinned Solidity formula;
+- with `config.hydration`, strict section parsing, misplaced-protocol-transaction
+  rejection before replay, and no prefix check without the section; and
 - raw-digest ECDSA recovery, low-`s`, and `v` encoding.
 
 The root Kurtosis gate MUST also observe at least one successful signer
@@ -1680,7 +1739,10 @@ The principal sources for this specification are:
   outbound, DA, and system-transaction gates;
 - `src/attest.rs` and `../eez-protocol/src/signer.rs` for attestation;
 - `../eez-protocol/src/abi.rs`, `action.rs`, `rolling_hash.rs`,
-  `public_inputs.rs`, and `system_tx.rs` for shared protocol mirrors; and
+  `public_inputs.rs`, and `system_tx.rs` for shared protocol mirrors;
+- `../hydration-config/src/lib.rs` for the `config.hydration` format and
+  `../hydration-node/src/lib.rs` with `../hydration-consensus-rules/src/lib.rs`
+  for its protocol-transaction prefix; and
 - `../../eez-core-protocol/src/interfaces/IEEZ.sol`, `EEZ.sol`,
   `src/interfaces/IEEZL2.sol`, `src/L2/EEZL2.sol`, and
   `src/rollupContract/Rollup.sol` for pinned protocol behavior; and

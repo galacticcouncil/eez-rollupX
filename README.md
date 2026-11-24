@@ -4,6 +4,9 @@ An EEZ rollup implementation derived from
 [eez-association/eez-rollup0](https://github.com/eez-association/eez-rollup0).
 The core contracts are pinned in the `eez-core-protocol` submodule.
 
+Hydration-specific behavior layered onto this fork is tracked in the
+[Hydration customization inventory](docs/hydration.md).
+
 This revision targets fresh networks with [permanent L1 history, delayed
 PREVRANDAO and offline v2 proving](docs/proposals/l1-origin-and-offline-proving.md)
 active from genesis. It requires matching new contracts, genesis and L2 datadirs;

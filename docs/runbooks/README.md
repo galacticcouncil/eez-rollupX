@@ -5,6 +5,7 @@ before reconstructing a process from scripts, old logs, or an earlier conversati
 
 | Task | Procedure | Verification status |
 | --- | --- | --- |
+| Inspect/rehearse Hydration governance and optional manager ownership handoff | [Governance PoC](../hydration/governance.md) | Ported local tests/rehearsals; no production activation or live deployment |
 | Review and implement backports from rollup0 or another source | [Backport review and implementation](backport-review.md) | Procedure only; each review records its own baseline and evidence |
 | Retire homelab CI, transfer ownership, and publish source/packages | [Public release](public-release.md) | Preparation PR; hosted execution and administrative cutover require verification |
 | New Chiado rollup: minimal command sequence | [Chiado quick start](chiado-quickstart.md) | Published-image procedure; fresh-host rehearsal pending |

@@ -1,13 +1,26 @@
 # Hydration customization inventory
 
 This document is the authoritative inventory of Hydration-specific behavior
-added to the RollupX fork. It describes the overlay introduced by the
-`hydration-evm` branch over fork `main`, not every historical difference between
+added to the RollupX fork. It covers the overlay introduced by the
+`hydration-evm` branch over fork `main` and subsequent Hydration work, including
+the governance PoC port. It does not describe every historical difference between
 RollupX and `eez-association/eez-rollup0`.
 
 Update this document whenever a change adds, removes, or changes Hydration
 behavior, its activation contract, compatibility boundary, operational setup, or
 validation. Keep general RollupX behavior in its owning specification or runbook.
+
+## Documentation inventory
+
+All dedicated Hydration documentation lives under `docs/hydration/`; this
+inventory is the sole exception. Add new documents to this table and follow
+the repository's [agent guidance](../AGENTS.md#hydration-documentation).
+
+| Document | Purpose and status |
+| --- | --- |
+| [Genesis and deployment](hydration/genesis.md) | Optional genesis section, role accounts, counter seed and fresh-network setup; deployment with this profile remains unexercised. |
+| [Governance guide](hydration/governance.md) | Timelock contracts, local rehearsals, reader and optional ownership handoff; no production runtime activation. |
+| [Governance port design and validation](hydration/governance-port.md) | Source/target revisions, port decisions, permission boundaries, executed checks and remaining activation design. |
 
 ## Provenance snapshot
 
@@ -25,7 +38,7 @@ represents the Hydration boundary.
 
 ## Activation and compatibility contract
 
-Hydration behavior is enabled only when the L2 genesis contains a valid
+Hydration execution rules are enabled only when the L2 genesis contains a valid
 `config.hydration` object. Rules version 1 requires distinct, nonzero
 `oracleUpdater` and `peplKeeper` addresses and a counter account at
 `0x0000000000000000000000000000000000000800` seeded with nonce 1 and no balance,
@@ -39,6 +52,10 @@ runtime option or an activation-height upgrade. Every L2 executor, importer,
 payload builder, follower, and proof signer must use the same genesis document.
 L1 simulations retain stock precompiles.
 
+The governance PoC is separate opt-in administrative tooling. It does not
+activate execution rules, change genesis or install a runtime switch. Its
+rehearsal release IDs 0/1 are separate from genesis `rulesVersion = 1`.
+
 ## Feature inventory
 
 | ID | Status | Customization | Owning implementation |
@@ -51,7 +68,9 @@ L1 simulations retain stock precompiles.
 | HYD-06 | Supporting integration | Share checked roles and rule helpers without coupling portable consensus code to Reth or the EVM. Extend testkit builders and process tests so stock and Hydration profiles exercise payload construction, import, signer rejection, history-prefix interaction, counter state, and cross-chain admission. | Four `hydration-*` crates; `eez-testkit`; `eez-node-e2e` |
 | HYD-07 | Adapter present; not production-wired | Provide a ZisK proof-system adapter that binds schema, public-input hash, program verification key, rollup ID, manager registration, and the external ZisK verifier call. The branch does not wire a real Hydration-aware guest/prover or a production deployment path. | `contracts/src/zisk`; `contracts/test/zisk` |
 | HYD-08 | Test-only | Provide `CounterRelay` for process-test calls and `MockZiskVerifier` for adapter tests. Neither contract is a production authorization or proof system. | `contracts/src/CounterRelay.sol`; `contracts/src/zisk/MockZiskVerifier.sol` |
-| HYD-09 | Supporting tooling and operations | Include the Hydration process-test binary in native artifact inventories and document the optional genesis section and seed in the Chiado deployment runbook. | `scripts/ci/native-tests.py`; `scripts/ci/tests/test_native_artifacts.py`; `docs/runbooks/chiado-deployment.md` |
+| HYD-09 | Supporting tooling and operations | Include the Hydration process-test binary in native artifact inventories and document the optional genesis section and seed, linked from the Chiado deployment runbook. | `scripts/ci/native-tests.py`; `scripts/ci/tests/test_native_artifacts.py`; [Genesis setup](hydration/genesis.md) |
+| HYD-10 | Opt-in authorization PoC; local tests/rehearsals | Timelock exact calls, rotate authority and record release/height metadata. Manager operational ownership and ProxyAdmin ownership remain separate; authenticated OpenGov and native voting are absent. | `contracts/src/governance/`; governance deployment/rehearsal scripts and tests; [Governance guide](hydration/governance.md) |
+| HYD-11 | Isolated reader/model; no production consumers | Read finalized L1 schedule snapshots and rehearse selection, pause/recovery and permit checks. Optional deployment tooling checks local genesis identity; no evm2 runtime switch, signer RPC or height-aware proof enforcement is installed. | `crates/hydration-governance/`; `scripts/deploy-runtime-governance.sh`; `scripts/ci/tests/test_governance_deploy.py`; [Port design](hydration/governance-port.md) |
 
 ## Consensus and execution invariants
 
@@ -145,6 +164,30 @@ authoritative for behavior.
 - `scripts/ci/native-tests.py`
 - `scripts/ci/tests/test_native_artifacts.py`
 
+## Governance follow-up paths
+
+The governance port targets baseline
+`9666c539919cdcebb7d939e30ede133312ba3434` with the same pinned Core revision.
+These paths are subsequent work, not part of the 48-path introduction snapshot:
+
+- Contracts: `contracts/src/governance/{AuthorityRegistry,UpgradeController,ExecutionUpgradeSchedule}.sol`.
+- Deployment and rehearsal: `contracts/script/{DeployUpgradeController,DeployRuntimeGovernance,RehearseGovernance,RehearseExecutionUpgrade}.s.sol`.
+- Contract coverage: `contracts/test/{UpgradeController,ExecutionUpgradeSchedule,DeployUpgradeController,DeployRuntimeGovernance,GovernanceProxyIntegration}.t.sol`.
+- Isolated library: `crates/hydration-governance/Cargo.toml`, `src/lib.rs`,
+  `src/execution_schedule.rs`, `src/execution_schedule/tests.rs`, `src/execution_version.rs`,
+  `src/runtime.rs`, `src/runtime/tests.rs`, `examples/runtime_schedule.rs` and
+  `examples/genesis_identity.rs` (all relative to `crates/hydration-governance/`).
+- Operator helper and coverage: `scripts/deploy-runtime-governance.sh` and
+  `scripts/ci/tests/test_governance_deploy.py`.
+- Workspace registration: `Cargo.toml`, `Cargo.lock`; documentation and pointers:
+  `AGENTS.md`, `contracts/README.md`, `docs/runbooks/README.md`,
+  `docs/runbooks/chiado-deployment.md`, this inventory and the documents above.
+
+No production execution, node, signer or core implementation is changed by this
+port. Its [dated validation results](hydration/governance-port.md#executed-validation--2026-11-24)
+cover local tests and rehearsals, not live deployment or an end-to-end runtime
+upgrade. Keep those results separate from the introduction snapshot below.
+
 ## Validation snapshot
 
 The introduction range was independently reviewed and then checked with a
@@ -170,6 +213,8 @@ When the Hydration overlay changes:
 1. Update the relevant feature row, status, invariants, and owning paths here.
 2. Update the owning specification or runbook when wire, consensus,
    configuration, storage, deployment, or mixed-version behavior changes.
+   Keep dedicated Hydration docs under `docs/hydration/` and update the
+   documentation inventory above; shared documents link to them.
 3. Add new introduction or follow-up paths to the manifest; do not remove
    historical introduction paths merely because code later moves.
 4. Record the change's revisions and validation in the applicable task note or

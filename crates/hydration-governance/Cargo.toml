@@ -1,0 +1,27 @@
+[package]
+name = "hydration-governance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Opt-in Hydration governance schedule reader and rehearsal model; no production activation."
+
+[dependencies]
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-provider.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-sol-types.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+eez-l1.workspace = true
+eez-evm.workspace = true
+eyre.workspace = true
+alloy-transport = { version = "2", default-features = false }
+serde_json.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

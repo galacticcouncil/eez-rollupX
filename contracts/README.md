@@ -7,6 +7,10 @@ for sequential consumption, strict error handling and compatibility.
 
 ## Foundry
 
+Hydration's opt-in governance contracts, local rehearsals and permission boundaries
+are documented in the [governance guide](../docs/hydration/governance.md). They do not enable runtime upgrades
+in normal node/signer startup.
+
 **Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
 
 Foundry consists of:

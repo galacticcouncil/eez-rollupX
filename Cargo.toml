@@ -22,6 +22,7 @@ members = [
     "crates/eez-prover-client",
     "crates/eez-testkit",
     "crates/hydration-config",
+    "crates/hydration-governance",
     "crates/hydration-consensus-rules",
     "crates/hydration-node",
     "crates/hydration-precompiles",

@@ -5077,6 +5077,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "hydration-governance"
+version = "0.1.0"
+dependencies = [
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-types-eth",
+ "alloy-sol-types",
+ "alloy-transport",
+ "eez-evm",
+ "eez-l1",
+ "eyre",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "hydration-node"
 version = "0.1.0"
 dependencies = [

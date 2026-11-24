@@ -422,6 +422,28 @@ When an authorized change invalidates instructions, update the owning
 specification/runbook and affected `AGENTS.md` guidance in the same change. Link
 authoritative procedures instead of duplicating them.
 
+### Hydration documentation
+
+- Read [docs/hydration.md](docs/hydration.md) before changing Hydration behavior;
+  it is the authoritative inventory of features, activation boundaries and status.
+- Put all dedicated Hydration documentation under `docs/hydration/`, including
+  designs, proposals, runbooks and validation notes. The inventory at
+  `docs/hydration.md` is the sole location exception. Do not create parallel
+  Hydration guides under `contracts/`, crate directories, `docs/proposals/` or
+  `docs/runbooks/`; link to the owning document instead.
+- Update the inventory's documentation links, feature status, owning paths and
+  invariants whenever adding, changing or removing Hydration features or docs.
+  Preserve historical provenance and label validation with the revision it covers.
+- Keep shared RollupX specifications, runbooks and code-local API/fixture notes
+  beside their owners. Retain necessary integration constraints there, linking
+  to `docs/hydration/` for dedicated Hydration setup and design details.
+- Distinguish local PoCs and metadata from enabled production behavior. In
+  particular, governance rehearsals do not establish authenticated OpenGov,
+  production runtime activation or height-aware proof enforcement.
+
+The general record conventions below still apply; dedicated Hydration records
+use `docs/hydration/` rather than the general proposal/runbook directories.
+
 ### Comments and API documentation
 
 - Explain what a reader needs to safely change the current code: non-obvious

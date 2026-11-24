@@ -1,0 +1,94 @@
+version: '3.8'
+x-runtime: &runtime
+  replicas: 1
+  placement:
+    constraints: [node.labels.platform.data == true]
+  update_config:
+    order: stop-first
+  rollback_config:
+    order: stop-first
+  restart_policy:
+    condition: on-failure
+services:
+  execution:
+    image: ghcr.io/paradigmxyz/reth@sha256:0d16db7cfaa9e2aa8dc87664f94fd87d9a34f1a79d7eeded1c4867f91f9c13d4
+    command:
+      - node
+      - --chain=/genesis/metadata/genesis.json
+      - --datadir=/execution
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.api=eth,net,web3
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.jwtsecret=/run/secrets/engine-jwt
+      - --disable-discovery
+    volumes:
+      - genesis:/genesis:ro
+      - execution:/execution
+    secrets:
+      - source: engine_jwt
+        target: engine-jwt
+    networks: [l1]
+    stop_grace_period: 2m
+    deploy: *runtime
+  beacon:
+    image: sigp/lighthouse@sha256:9e71f6db59d358acb43719fcc5240952811821cc2fc4c3cfa90e57f2e4b38288
+    command:
+      - lighthouse
+      - bn
+      - --testnet-dir=/genesis/metadata
+      - --datadir=/beacon
+      - --execution-endpoint=http://execution:8551
+      - --execution-jwt=/run/secrets/engine-jwt
+      - --http
+      - --http-address=0.0.0.0
+      - --disable-discovery
+      - --enable-private-discovery
+      - --allow-insecure-genesis-sync
+      - --supernode
+    volumes:
+      - genesis:/genesis:ro
+      - beacon:/beacon
+    secrets:
+      - source: engine_jwt
+        target: engine-jwt
+    networks: [l1]
+    stop_grace_period: 2m
+    deploy: *runtime
+  validator:
+    image: sigp/lighthouse@sha256:9e71f6db59d358acb43719fcc5240952811821cc2fc4c3cfa90e57f2e4b38288
+    command:
+      - lighthouse
+      - vc
+      - --testnet-dir=/genesis/metadata
+      - --datadir=/validators
+      - --beacon-nodes=http://beacon:5052
+      - --init-slashing-protection
+      - --suggested-fee-recipient=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+    volumes:
+      - genesis:/genesis:ro
+      - validators:/validators
+    networks: [l1]
+    stop_grace_period: 2m
+    deploy: *runtime
+networks:
+  l1:
+    driver: overlay
+    attachable: true
+volumes:
+  genesis:
+    external: true
+    name: eez-devnet-414141-genesis
+  execution:
+    external: true
+    name: eez-devnet-414141-execution
+  beacon:
+    external: true
+    name: eez-devnet-414141-beacon
+  validators:
+    external: true
+    name: eez-devnet-414141-validators
+secrets:
+  engine_jwt:
+    external: true
+    name: eez-devnet-engine-jwt

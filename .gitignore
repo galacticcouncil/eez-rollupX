@@ -31,3 +31,5 @@ __pycache__/
 # ...except the templates, which carry placeholders instead of keys.
 !.env.*.example
 /.ci-cargo-state/
+
+.idea

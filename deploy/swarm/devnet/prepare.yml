@@ -1,0 +1,27 @@
+version: '3.8'
+services:
+  prepare:
+    image: ethpandaops/ethereum-genesis-generator@sha256:017f8bdbd454d2fcf4e0f65f6c64b5bc4c991f5846220e9be188145fa85875db
+    entrypoint: [bash, /prepare.sh]
+    configs:
+      - source: prepare_v2
+        target: /prepare.sh
+    volumes:
+      - genesis:/data
+      - validators:/validators
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.labels.platform.data == true]
+      restart_policy:
+        condition: none
+configs:
+  prepare_v2:
+    file: ./prepare.sh
+volumes:
+  genesis:
+    external: true
+    name: eez-devnet-414141-genesis
+  validators:
+    external: true
+    name: eez-devnet-414141-validators

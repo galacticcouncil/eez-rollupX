@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "name": "eez-local-1",
+  "environment": "local",
+  "l1_chain_id": 414141,
+  "l2_chain_id": 424242
+}

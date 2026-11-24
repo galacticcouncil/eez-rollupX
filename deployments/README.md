@@ -1,5 +1,9 @@
 # Deployed networks
 
+For planning a new local, Lark staging or Chiado network from a CI release,
+see [network planning](../deploy/networks/README.md). Plans are separate from
+the historical deployment records below.
+
 Each directory records a running network by `<l1-network>-<l2ChainId>`. Its
 `genesis.json` is the exact chain document the network's nodes use as
 `--chain`, copied byte for byte from a running deployment and checked against

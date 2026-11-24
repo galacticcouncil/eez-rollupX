@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "name": "eez-chiado-1",
+  "environment": "chiado",
+  "l1_chain_id": 10200,
+  "l2_chain_id": 906970
+}

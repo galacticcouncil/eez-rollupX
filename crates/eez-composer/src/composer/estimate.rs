@@ -139,7 +139,8 @@ pub struct GasEstimator {
     rollup_id: u64,
     poster: Address,
     post_batch_target: Address,
-    verifier: Address,
+    verifiers: Vec<Address>,
+    quorum: Option<crate::AttestationQuorum>,
     l1_slot_seconds: u64,
     recipient: Address,
 }
@@ -205,7 +206,8 @@ where
             rollup_id,
             poster: cc.exec_ctx.l1_poster_signer.address(),
             post_batch_target: self.inner.posting.post_batch_target,
-            verifier: cc.exec_ctx.ecdsa_proof_system_address,
+            verifiers: self.inner.posting.proof_systems.clone(),
+            quorum: self.inner.posting.quorum.clone(),
             l1_slot_seconds: self.inner.emission.timing.l1_block_time().as_secs(),
             recipient: self.inner.fee_recipient,
         })
@@ -852,19 +854,23 @@ impl GasEstimator {
                 };
                 let overhead = super::policy::semantic_overhead(self.rollup_id, &[semantic])
                     .map_err(unavailable)?;
-                let bytes = eez_blob_codec::native_stream_len(
+                let da = super::fees::quote::da_estimate(
                     pricing.operations,
                     overhead
                         .semantic_bytes
                         .checked_add(s.prefix_semantic_bytes)
                         .ok_or_else(|| unsupported("pending semantic bytes overflow"))?,
+                    self.recipient,
+                    pricing.maximum_blobs,
                 )
-                .map_err(unavailable)?;
-                let blobs = bytes.div_ceil(eez_blob_codec::DATA_BYTES_PER_BLOB).max(1);
-                if bytes > 2 * 1024 * 1024 || blobs > pricing.maximum_blobs {
-                    return Err(unsupported("quote DA capacity"));
+                .map_err(|error| match error {
+                    super::fees::quote::FeeQuoteError::Limit(reason) => unsupported(reason),
+                    error => unavailable(error),
+                })?;
+                if da.bytes > 2 * 1024 * 1024 {
+                    return Err(unsupported("DA bytes"));
                 }
-                (blobs, bytes)
+                (da.blobs, da.bytes)
             } else {
                 (0, 0)
             };
@@ -885,7 +891,7 @@ impl GasEstimator {
                     batch: &batch,
                     composition: &composition,
                     tx: tx.clone(),
-                    digest,
+                    digest: &digest,
                     posting: pricing.as_ref().map(|p| p.posting),
                     blob_hashes: &hashes,
                     gas_limit: None,
@@ -914,7 +920,7 @@ impl GasEstimator {
                             batch: &batch,
                             composition: &composition,
                             tx,
-                            digest,
+                            digest: &digest,
                             posting: Some(pricing.posting),
                             blob_hashes: &hashes,
                             gas_limit: Some(gas_limit),

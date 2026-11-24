@@ -78,6 +78,7 @@ postcard.workspace   = true
 rustix.workspace     = true
 
 # app
+futures-util.workspace = true
 eyre.workspace    = true
 tokio.workspace   = true
 tracing.workspace = true

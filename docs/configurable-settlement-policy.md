@@ -624,7 +624,17 @@ execution gas, including the maximum gas refund. One async mutex shares a
 posting and quote requests; only validated samples enter it, keyed by block hash.
 The cache contains no queue ownership and is reconstructed after restart.
 The complete filtered read has a five-second timeout, including cache-lock
-waiting; cancellation releases the guard without leaving a background sampler.
+waiting. Cancellation releases the foreground guard. A general, drain or window-limit
+preparation hint can prefetch the reconciled parent into this same cache. One
+worker per Composer loads at most one new block per advancing head, with a
+two-slot burst allowance and one start per L1 slot on average. It drops busy
+hints and performs RPC work outside the cache lock. Two consecutive prefetch
+failures (including timeouts) pause the worker until a successful posting or
+advisory quote loads missing history from the provider. A restart, a missed hint or an unvalidated sample leaves the ordinary
+foreground lookup in charge. Each quote still checks its provider, canonical
+head and exact ancestry. The fee-quote event records total quote microseconds,
+filtered-history lock wait in microseconds and the number of foreground sample
+misses as `quote_elapsed_us`, `history_lock_us` and `history_misses`.
 Fixed priority overrides bypass sampling. Without L1 refund recovery the original
 fee-history path remains unchanged. Fee selection logs identify
 `priority_source=filtered_receipts` and `excluded_priority_transactions`.
@@ -1332,13 +1342,15 @@ or pending ownership change. This Composer-only correction changes no protocol,
 signer wire, genesis, database or follower replay. Mixed versions retain the same
 successful schema; old Composer versions retain the nonce/snapshot bug.
 
-For L2-origin quotes, accumulated ordinary history may exceed one posting's blob
-allowance even when the candidate's complete cross-chain group fits. In this case
+For either source direction, accumulated ordinary history may exceed one posting's
+blob allowance even when the candidate's complete cross-chain group fits. In this case
 the quote reserves the full target/operator blob allowance for the candidate's
 post; it does not charge for an impossible oversized single post. Signed quote
-checks and tariff admission use the same calculation. Actual posting retains the
-candidate and drains its historical predecessor through the existing path before
-settling the group. Quotes never advance the canonical settlement cursor.
+checks and admission use the same calculation, including owned L1 predecessor
+semantics. Inbound conditional native replay uses the reserved count for blob
+hashes, indices, the post transaction, poster funding and cost. Actual posting
+retains the candidate and drains its historical predecessor through the existing
+path before settling the group. Quotes never advance the canonical settlement cursor.
 
 The detailed estimate adds `historyDeferred: true` in this case. `daBytes` still
 reports the complete unsplit history-plus-candidate size; `blobs` is the reserved
@@ -1346,17 +1358,25 @@ count for one eventual candidate post, so the two need not describe one encoded
 payload when history is deferred. When history fits, `historyDeferred` is false
 and the existing exact size/count calculation is unchanged. The compact response
 is unchanged. The reservation may exceed the final post's actual blob count.
+The empty-terminal estimate excludes a slot-specific history update; actual
+admission sizes the built terminal, so a near-capacity quote may still be deferred.
 
-A candidate whose complete terminal group alone exceeds the allowance still
-returns `quote_limit` with `blob allowance`; it must never be made quotable by
-omitting semantic data. Bounded history scanning, DA work limits, fee-dependent
-execution and final native validation still apply. A quote does not reserve a
-future target or guarantee admission after state or prices change. Ordinary
-history settlement remains governed by its existing funding/subsidy policy.
+A candidate whose complete terminal group (including owned predecessor semantics)
+exceeds the allowance still fails with `blob allowance`; it must never be made
+quotable by omitting semantic data. L2 quotes return `quote_limit`; inbound
+quotes retain `unsupported_transaction` with debug `unsupported_execution`
+details. The unsplit aggregate must still fit the 2 MiB work bound (`DA bytes`);
+that rejection is a backlog/work limit, not proof of individual oversize.
+Existing history-window/byte limits, fee-dependent execution and final native
+validation still apply. Error/retry classifications are unchanged. A quote does
+not reserve a future target or guarantee admission after state or prices change.
+Ordinary history settlement remains governed by its existing funding/subsidy policy.
 This Composer-only change requires no signer/follower, protocol, genesis or storage
-migration. Older Composer fronts can still reject these backlog requests; update
-the Composer serving quotes and signed admission together. Rollback restores the
-older rejection behavior without changing retained chain data.
+migration. Older Composer fronts can still reject these inbound backlog requests;
+update the Composer serving quotes and signed admission together. Rollback restores
+the older rejection behavior without changing retained chain data. Pending ownership
+remains in memory: restarting or rolling back may require clients to resubmit
+unsettled work. Quote expiry alone does not discard an accepted request.
 
 `gas` is optional. Its explicit value is preserved and must fit 21,000..16,777,216
 as well as native transaction/block capacity. When absent, the existing internal
@@ -1750,7 +1770,8 @@ Unresolved native history is excluded by choosing the preceding L2 parent. A
 transaction depending on that excluded state (including a nonce predecessor or
 a newly deployed contract) still needs reconciliation; its dependencies are not
 guessed. The quote charges this single transaction the complete estimated post
-and retained ordinary history; it assumes no future batch participants.
+and retained ordinary history when it fits, or reserves the full allowed post
+when history is deferred as above; it assumes no future batch participants.
 
 The [fee pricing arithmetic](#fee-pricing-arithmetic) adds service costs,
 risk/profit and conversion. Starting at a zero priority fee, the backend raises

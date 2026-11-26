@@ -13,10 +13,10 @@ x-relay: &relay
   image: ethpandaops/mev-boost-relay@sha256:3600f04fcaf0bbb231f4737470f094fdf2314db54b4853197fa369aea90f8b19
   entrypoint: [sh, /relay-start.sh]
   configs:
-    - source: relay_start_v2
+    - source: relay_start_v3
       target: /relay-start.sh
   volumes: [genesis:/genesis:ro]
-  networks: [l1, database, relay]
+  networks: [l1, relay]
   environment:
     REDIS_URI: redis:6379
     BEACON_URIS: http://beacon:5052
@@ -26,6 +26,28 @@ x-relay: &relay
     ENABLE_BUILDER_CANCELLATIONS: '1'
   deploy: *relay-deploy
 services:
+  postgres:
+    image: postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+    configs:
+      - source: postgres_init_v1
+        target: /docker-entrypoint-initdb.d/10-relay.sh
+        mode: 0555
+    secrets:
+      - source: postgres_password
+        target: postgres-password
+      - source: relay_password
+        target: relay-password
+    volumes: [postgres:/var/lib/postgresql/data]
+    networks: [relay]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres -d postgres']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    stop_grace_period: 1m
+    deploy: *relay-deploy
   redis:
     image: redis:alpine@sha256:becdda6c7f4b3fb42e42fd7f120bbf5c54c4caaaf16f26da24e4563d2c1f0576
     command: [redis-server, --appendonly, 'yes']
@@ -51,8 +73,10 @@ services:
       <<: *relay-deploy
       replicas: 1
 configs:
-  relay_start_v2:
+  relay_start_v3:
     file: ./relay-start.sh
+  postgres_init_v1:
+    file: ./provision-relay.sh
 volumes:
   genesis:
     external: true
@@ -60,16 +84,19 @@ volumes:
   redis:
     external: true
     name: eez-devnet-414141-redis
+  postgres:
+    external: true
+    name: eez-devnet-414141-postgres
 networks:
   l1:
     external: true
     name: eez-devnet_l1
-  database:
-    external: true
-    name: platform_database
   relay:
     driver: overlay
 secrets:
+  postgres_password:
+    external: true
+    name: eez-devnet-postgres-password
   relay_password:
     external: true
     name: eez-devnet-relay-password

@@ -2,43 +2,47 @@
 
 The private L1 uses the pinned Ethereum-package PBS topology: a separate
 Reth-rbuilder execution client and Lighthouse beacon, a Flashbots-style relay
-(housekeeper and API), Redis, and MEV-Boost connected to the canonical proposer.
+(housekeeper and API), PostgreSQL, Redis, and MEV-Boost connected to the canonical proposer.
 All interfaces remain on private overlays; no host ports are published.
 
-The relay uses the shared PostgreSQL service with its own non-superuser login
-and database `eez_devnet_relay`. Runtime services mount only their own password
-and signing secrets. The admin password is mounted only by the one-shot
-provisioning task. Do not inspect secret contents or put DSNs in command args.
+PostgreSQL and Redis both belong to `eez-devnet-pbs`, with dedicated persistent
+volumes and a private stack overlay. No shared database service or platform
+database network is required. The relay uses the non-superuser login/database
+`eez_devnet_relay`. Only PostgreSQL mounts its dedicated admin password; relay
+tasks receive their own password/signing secrets. Do not inspect secret contents
+or put DSNs in command args.
 
 ## Provision once
 
-From this directory, after the L1 is finalized:
+From this directory, after the L1 is finalized. On another developer's machine,
+use Docker Swarm and label the intended data node `platform.data=true` as in the
+[L1 prerequisites](README.md#prepare-once). The label selects local storage;
+it does not require a separately deployed platform stack. Generate each secret
+once; ordinary restart reuses existing secrets and volumes:
 
 ```sh
 openssl rand -hex 32 | sudo docker secret create eez-devnet-relay-password -
+openssl rand -hex 32 | sudo docker secret create eez-devnet-postgres-password -
 (printf '00'; openssl rand -hex 31) | sudo docker secret create eez-devnet-relay-signing-key -
 sudo docker volume create eez-devnet-414141-redis
+sudo docker volume create eez-devnet-414141-postgres
 sudo docker volume create eez-devnet-414141-pbs
 sudo docker volume create eez-devnet-414141-builder
 sudo docker volume create eez-devnet-414141-builder-beacon
-sudo docker stack deploy --detach=true -c relay-provision.yml eez-devnet-relay-provision
-sudo docker service ps eez-devnet-relay-provision_provision --no-trunc
-sudo docker service logs eez-devnet-relay-provision_provision
-```
-
-Require completion of CREATE ROLE, CREATE DATABASE and REVOKE. Provisioning
-deliberately fails on an existing role/database; it never resets another task's
-state or silently changes an existing password. Partial failure requires
-inspection and explicit recovery. This database participates in shared server
-backups; any restore must be isolated.
-
-```sh
 sudo docker stack deploy --detach=true -c relay.yml eez-devnet-pbs
+sudo docker service ps eez-devnet-pbs_postgres --no-trunc
+sudo docker service logs --tail 30 eez-devnet-pbs_postgres
 sudo docker service logs --tail 30 eez-devnet-pbs_relay-housekeeper
 sudo docker service logs --tail 30 eez-devnet-pbs_relay-api
 ```
 
-Require the housekeeper's metrics listener and successful database setup. The
+PostgreSQL's official entrypoint runs `provision-relay.sh` only on an empty data
+volume, creating the separate runtime role/database and revoking PUBLIC access.
+Require PostgreSQL readiness and the housekeeper's metrics listener. Swarm does
+not order service startup; relay tasks may restart while the database initializes.
+Existing data volumes skip initialization, so changing a secret alone does not
+rotate an existing database password. Partial initialization needs inspection
+and explicit recovery, not volume deletion or automatic reprovisioning. The
 API wrapper waits for that post-migration metrics endpoint. Read the API's
 **public** BLS key from its `Using BLS key` log; supply it as
 `EEZ_DEVNET_RELAY_PUBLIC_KEY` when rendering bootstrap state below. This pins the
@@ -117,14 +121,50 @@ not a change to ZisK, EEZ execution rules or the Core protocol.
 Inspect service logs/tasks through Swarmpit or `sudo docker service logs/ps` for
 `eez-devnet-builder_builder`, `eez-devnet-builder_builder-beacon`,
 `eez-devnet-pbs_relay-api`, `eez-devnet-pbs_relay-housekeeper`,
-`eez-devnet-pbs_redis`, and `eez-devnet-boost_mev-boost`.
+`eez-devnet-pbs_redis`, `eez-devnet-pbs_postgres`, and `eez-devnet-boost_mev-boost`.
 
 Stopping just `local-devnet.sh stop` stops the canonical L1 writers. To stop
-the rest of PBS while preserving state, scale these six services to zero too.
+the rest of PBS while preserving state, stop L2 consumers and relay writers,
+then scale the remaining PBS services to zero too.
 Keep database, Redis, PBS bindings and signing secrets for restart. Do not rotate
 keys, delete volumes or recreate databases as part of ordinary restart. Builder
-and relay data have no tested restore procedure yet. This remains a single-host
-development network.
+recovery still requires the same L1 genesis, relay signing key, database and Redis
+state. This remains a single-host development network.
+
+## Database backup and recovery
+
+PostgreSQL data is in external volume `eez-devnet-414141-postgres`; Redis AOF is
+in `eez-devnet-414141-redis`. Neither volume is removed by stack removal. The
+shared server's PostgreSQL backup job does not back up this dedicated database.
+
+For a consistent logical backup, pause relay API and housekeeper writers and
+run `pg_dump -Fc --no-owner --no-acl` in a one-shot PostgreSQL 17 Swarm task on
+`eez-devnet-pbs_relay`, connecting to `eez-devnet-pbs_postgres` as
+`eez_devnet_relay`. Read the mounted relay-password secret inside the task; write
+the dump with umask 077 into a dedicated backup volume. Retain the paired Redis
+state and signing secret securely. Never print dumps or credentials in logs.
+
+Restore into an isolated instance first, using the same runtime role and
+`pg_restore --no-owner --no-acl --exit-on-error --single-transaction`. Compare
+schema and exact table counts before reconnecting writers. Do not restore over
+a running relay database. A rollback after new writes requires reconciliation;
+reconnecting a stale copy can lose relay records. The migration below exercised
+database restore, not a complete L1/PBS disaster-recovery procedure.
+
+## Move from the former shared database, 2026-11-26
+
+The original server deployment used a dedicated database on the shared instance.
+It was migrated with API/housekeeper writers paused. A custom-format backup was
+restored into the new stack-owned PostgreSQL service; exact row counts matched
+across all eight public tables, and the runtime role's non-superuser privileges
+were verified before restarting writers. The source database remains untouched
+for recovery and is no longer used by runtime services.
+
+The migration dump/checksums and count evidence are retained privately in
+`eez-devnet-414141-postgres-migration-261126`. It is not needed for a fresh devnet.
+The historical shared provisioning task was scaled to zero and its credential
+mounts removed after migration. New developers initialize directly through
+`relay.yml`; the separate shared-database provisioning stack has been removed.
 
 ## Executed validation, 2026-11-26
 

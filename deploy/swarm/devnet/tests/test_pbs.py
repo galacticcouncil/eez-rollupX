@@ -21,12 +21,27 @@ class PbsTest(unittest.TestCase):
                 self.assertNotIn("ports", service)
                 self.assertEqual(service["deploy"]["update_config"]["order"], "stop-first")
 
-    def test_only_provisioning_mounts_admin_credentials(self):
-        provision = yaml.safe_load((ROOT / "relay-provision.yml").read_text())
-        self.assertEqual(provision["secrets"]["admin_password"]["name"], "postgres_admin_password")
+    def test_database_and_redis_are_owned_by_the_pbs_stack(self):
         relay = yaml.safe_load((ROOT / "relay.yml").read_text())
-        self.assertNotIn("admin_password", relay["secrets"])
-        for service in relay["services"].values():
+        self.assertEqual(set(relay["networks"]), {"l1", "relay"})
+        self.assertEqual(relay["volumes"]["postgres"]["name"], "eez-devnet-414141-postgres")
+        for name in ("postgres", "redis"):
+            service = relay["services"][name]
+            self.assertEqual(service["networks"], ["relay"])
+            self.assertIn("node.labels.platform.data == true", service["deploy"]["placement"]["constraints"])
+            self.assertEqual(service["deploy"]["replicas"], 1)
+        self.assertIn("/docker-entrypoint-initdb.d/10-relay.sh",
+                      [c["target"] for c in relay["services"]["postgres"]["configs"]])
+        self.assertIn("@postgres:5432/", (ROOT / "relay-start.sh").read_text())
+        for path in (ROOT / "relay.yml", ROOT / "relay-start.sh", ROOT / "provision-relay.sh"):
+            self.assertNotIn("platform_", path.read_text())
+
+    def test_only_postgres_mounts_its_admin_credentials(self):
+        relay = yaml.safe_load((ROOT / "relay.yml").read_text())
+        self.assertEqual(relay["secrets"]["postgres_password"]["name"], "eez-devnet-postgres-password")
+        for name, service in relay["services"].items():
+            mounted = {s["source"] for s in service.get("secrets", [])}
+            self.assertEqual("postgres_password" in mounted, name == "postgres")
             self.assertNotIn("POSTGRES_DSN", service.get("environment", {}))
             self.assertNotIn("--db", service.get("command", []))
             self.assertNotIn("--secret-key", service.get("command", []))

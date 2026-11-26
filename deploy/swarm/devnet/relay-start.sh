@@ -2,7 +2,7 @@
 set -eu
 # Read credentials only inside the task, never from service args or public config.
 password=$(cat /run/secrets/relay-password)
-export POSTGRES_DSN="postgresql://eez_devnet_relay:${password}@platform_postgres:5432/eez_devnet_relay?sslmode=disable"
+export POSTGRES_DSN="postgresql://eez_devnet_relay:${password}@postgres:5432/eez_devnet_relay?sslmode=disable"
 unset password
 export GENESIS_VALIDATORS_ROOT=$(cat /genesis/metadata/genesis_validators_root.txt)
 for fork in GENESIS ALTAIR BELLATRIX CAPELLA DENEB ELECTRA FULU; do

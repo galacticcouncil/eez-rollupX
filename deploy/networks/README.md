@@ -8,6 +8,10 @@ This first slice validates network intent and joins it with the existing
 [CI runtime manifest](../../scripts/ci/build-runtime-artifacts.sh). Python 3 and
 Git are sufficient; Docker, RPC access and credentials are not needed.
 
+For the running server-local L1, use the
+[Swarm devnet lifecycle](../swarm/devnet/README.md). It currently covers L1
+414141; the EEZ L2 424242 and builder path are still pending integration.
+
 ```sh
 python3 scripts/network-plan.py deploy/networks/lark.example.json /path/to/runtime/manifest.json
 ```

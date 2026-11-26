@@ -1,0 +1,66 @@
+version: '3.8'
+x-deploy: &deploy
+  replicas: 1
+  placement:
+    constraints: [node.labels.platform.data == true]
+  update_config:
+    order: stop-first
+  rollback_config:
+    order: stop-first
+  restart_policy:
+    condition: on-failure
+services:
+  builder:
+    image: eez-devnet-builder:261124-pbs-v1
+    environment:
+      CL_ENDPOINT: http://builder-beacon:5052
+    entrypoint: [/busybox, sh, /builder-start.sh]
+    configs:
+      - source: builder_start_v4
+        target: /builder-start.sh
+    volumes: [genesis:/genesis:ro, pbs:/pbs:ro, builder:/builder]
+    secrets:
+      - source: engine_jwt
+        target: engine-jwt
+    networks: [l1]
+    stop_grace_period: 2m
+    deploy: *deploy
+  builder-beacon:
+    image: sigp/lighthouse@sha256:9e71f6db59d358acb43719fcc5240952811821cc2fc4c3cfa90e57f2e4b38288
+    entrypoint: [bash, /builder-beacon-start.sh]
+    configs:
+      - source: builder_beacon_start_v3
+        target: /builder-beacon-start.sh
+    volumes: [genesis:/genesis:ro, pbs:/pbs:ro, builder_beacon:/beacon]
+    secrets:
+      - source: engine_jwt
+        target: engine-jwt
+    networks: [l1]
+    stop_grace_period: 2m
+    deploy: *deploy
+configs:
+  builder_start_v4:
+    file: ./builder-start.sh
+  builder_beacon_start_v3:
+    file: ./builder-beacon-start.sh
+volumes:
+  genesis:
+    external: true
+    name: eez-devnet-414141-genesis
+  pbs:
+    external: true
+    name: eez-devnet-414141-pbs
+  builder:
+    external: true
+    name: eez-devnet-414141-builder
+  builder_beacon:
+    external: true
+    name: eez-devnet-414141-builder-beacon
+networks:
+  l1:
+    external: true
+    name: eez-devnet_l1
+secrets:
+  engine_jwt:
+    external: true
+    name: eez-devnet-engine-jwt

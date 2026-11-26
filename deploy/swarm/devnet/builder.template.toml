@@ -1,0 +1,44 @@
+log_json = true
+log_level = "info,rbuilder=debug"
+chain = "/genesis/metadata/genesis.json"
+reth_datadir = "/builder"
+# Public Ethereum-package fixture, prefunded explicitly on this private L1.
+coinbase_secret_key = "607a11b45a7219cc61a3d9c5fd08c7eebd602a6a19a977f8d3771d5711a550f2"
+relay_secret_key = "607a11b45a7219cc61a3d9c5fd08c7eebd602a6a19a977f8d3771d5711a550f2"
+cl_node_url = ["http://builder-beacon:5052"]
+jsonrpc_server_port = 8645
+jsonrpc_server_ip = "0.0.0.0"
+el_node_ipc_path = "/tmp/reth.ipc"
+extra_data = "eez-swarm-builder"
+genesis_fork_version = "0x10000000"
+ignore_cancellable_orders = true
+live_builders = ["mp-ordering", "mgp-ordering"]
+enabled_relays = ["local"]
+root_hash_use_sparse_trie = true
+root_hash_compare_sparse_trie = false
+subsidy = "1"
+# The sample bidder has no timer to reconsider early candidates on an idle chain.
+slot_delta_to_start_bidding_ms = -12000
+
+[[relays]]
+name = "local"
+url = "http://__RELAY_PUBLIC_KEY__@relay-api:9062"
+priority = 0
+use_ssz_for_submit = false
+use_gzip_for_submit = false
+
+[[builders]]
+name = "mgp-ordering"
+algo = "ordering-builder"
+discard_txs = true
+sorting = "mev-gas-price"
+failed_order_retries = 1
+drop_failed_orders = true
+
+[[builders]]
+name = "mp-ordering"
+algo = "ordering-builder"
+discard_txs = true
+sorting = "max-profit"
+failed_order_retries = 1
+drop_failed_orders = true

@@ -1,0 +1,53 @@
+"""PBS service isolation and migration-gate regression checks."""
+from pathlib import Path
+import unittest
+import tomllib
+
+import yaml
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class PbsTest(unittest.TestCase):
+    def test_idle_chain_bids_start_at_the_slot_boundary(self):
+        template = tomllib.loads((ROOT / "builder.template.toml").read_text())
+        self.assertEqual(template["slot_delta_to_start_bidding_ms"], -12000)
+
+    def test_all_pbs_endpoints_are_private(self):
+        for filename in ("relay.yml", "builder.yml", "boost.yml"):
+            stack = yaml.safe_load((ROOT / filename).read_text())
+            for service in stack["services"].values():
+                self.assertNotIn("ports", service)
+                self.assertEqual(service["deploy"]["update_config"]["order"], "stop-first")
+
+    def test_only_provisioning_mounts_admin_credentials(self):
+        provision = yaml.safe_load((ROOT / "relay-provision.yml").read_text())
+        self.assertEqual(provision["secrets"]["admin_password"]["name"], "postgres_admin_password")
+        relay = yaml.safe_load((ROOT / "relay.yml").read_text())
+        self.assertNotIn("admin_password", relay["secrets"])
+        for service in relay["services"].values():
+            self.assertNotIn("POSTGRES_DSN", service.get("environment", {}))
+            self.assertNotIn("--db", service.get("command", []))
+            self.assertNotIn("--secret-key", service.get("command", []))
+
+    def test_api_waits_for_housekeeper_migrations(self):
+        script = (ROOT / "relay-start.sh").read_text()
+        self.assertIn('if [ "$1" = api ]', script)
+        self.assertIn('http://relay-housekeeper:9064/metrics', script)
+        self.assertIn('"$ready" ||', script)
+        self.assertLess(script.index('"$ready" ||'), script.index('exec /app/mev-boost-relay'))
+
+    def test_builder_never_shares_canonical_writable_storage(self):
+        builder = yaml.safe_load((ROOT / "builder.yml").read_text())
+        self.assertEqual(builder["volumes"]["builder"]["name"], "eez-devnet-414141-builder")
+        self.assertEqual(builder["volumes"]["builder_beacon"]["name"], "eez-devnet-414141-builder-beacon")
+        for service in builder["services"].values():
+            self.assertIn("genesis:/genesis:ro", service["volumes"])
+            self.assertIn("pbs:/pbs:ro", service["volumes"])
+
+    def test_proposer_uses_boost_without_disabling_fallback_checks(self):
+        stack = yaml.safe_load((ROOT / "stack.yml").read_text())
+        self.assertIn("--builder=http://mev-boost:18550", stack["services"]["beacon"]["command"])
+        self.assertNotIn("--builder-fallback-disable-checks", stack["services"]["beacon"]["command"])
+        self.assertIn("--builder-proposals", stack["services"]["validator"]["command"])

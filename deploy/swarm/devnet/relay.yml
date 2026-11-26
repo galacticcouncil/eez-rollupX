@@ -1,0 +1,78 @@
+version: '3.8'
+x-relay-deploy: &relay-deploy
+  replicas: 1
+  placement:
+    constraints: [node.labels.platform.data == true]
+  update_config:
+    order: stop-first
+  rollback_config:
+    order: stop-first
+  restart_policy:
+    condition: on-failure
+x-relay: &relay
+  image: ethpandaops/mev-boost-relay@sha256:3600f04fcaf0bbb231f4737470f094fdf2314db54b4853197fa369aea90f8b19
+  entrypoint: [sh, /relay-start.sh]
+  configs:
+    - source: relay_start_v2
+      target: /relay-start.sh
+  volumes: [genesis:/genesis:ro]
+  networks: [l1, database, relay]
+  environment:
+    REDIS_URI: redis:6379
+    BEACON_URIS: http://beacon:5052
+    SEC_PER_SLOT: '12'
+    SLOTS_PER_EPOCH: '32'
+    DB_TABLE_PREFIX: eez_devnet
+    ENABLE_BUILDER_CANCELLATIONS: '1'
+  deploy: *relay-deploy
+services:
+  redis:
+    image: redis:alpine@sha256:becdda6c7f4b3fb42e42fd7f120bbf5c54c4caaaf16f26da24e4563d2c1f0576
+    command: [redis-server, --appendonly, 'yes']
+    volumes: [redis:/data]
+    networks: [relay]
+    deploy: *relay-deploy
+  relay-housekeeper:
+    <<: *relay
+    command: [housekeeper, --network, custom, --beacon-uris, 'http://beacon:5052', --listen-addr, '0.0.0.0:9064']
+    secrets:
+      - source: relay_password
+        target: relay-password
+  relay-api:
+    <<: *relay
+    command: [api, --network, custom, --beacon-uris, 'http://beacon:5052', --listen-addr, '0.0.0.0:9062', --blocksim, 'http://builder:8545']
+    secrets:
+      - source: relay_password
+        target: relay-password
+      - source: relay_signing_key
+        target: relay-signing-key
+    # Private API; no submission traffic until the builder path is qualified.
+    deploy:
+      <<: *relay-deploy
+      replicas: 1
+configs:
+  relay_start_v2:
+    file: ./relay-start.sh
+volumes:
+  genesis:
+    external: true
+    name: eez-devnet-414141-genesis
+  redis:
+    external: true
+    name: eez-devnet-414141-redis
+networks:
+  l1:
+    external: true
+    name: eez-devnet_l1
+  database:
+    external: true
+    name: platform_database
+  relay:
+    driver: overlay
+secrets:
+  relay_password:
+    external: true
+    name: eez-devnet-relay-password
+  relay_signing_key:
+    external: true
+    name: eez-devnet-relay-signing-key

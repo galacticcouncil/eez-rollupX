@@ -1,0 +1,33 @@
+version: '3.8'
+services:
+  bootstrap:
+    image: ethpandaops/ethereum-genesis-generator@sha256:017f8bdbd454d2fcf4e0f65f6c64b5bc4c991f5846220e9be188145fa85875db
+    entrypoint: [bash, /bootstrap.sh]
+    configs:
+      - source: bootstrap_v2
+        target: /bootstrap.sh
+      - source: builder_template_v2
+        target: /builder.template.toml
+    environment:
+      EEZ_DEVNET_RELAY_PUBLIC_KEY: ${EEZ_DEVNET_RELAY_PUBLIC_KEY:?supply the relay API public BLS key}
+    volumes: [pbs:/pbs]
+    networks: [l1]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: none
+      placement:
+        constraints: [node.labels.platform.data == true]
+configs:
+  bootstrap_v2:
+    file: ./bootstrap-pbs.sh
+  builder_template_v2:
+    file: ./builder.template.toml
+volumes:
+  pbs:
+    external: true
+    name: eez-devnet-414141-pbs
+networks:
+  l1:
+    external: true
+    name: eez-devnet_l1

@@ -3,13 +3,27 @@
 First stage of the server devnet/Lark deployment path: private Ethereum PoS L1,
 L1 chain ID 414141, planned L2 chain ID 424242, 12-second slots, 64 validators, Fulu and BPO1 from genesis
 (15 maximum / 10 target blobs). Mainnet preset epochs remain 32 slots.
-Builder/PBS and the EEZ L2 are the next stage. This stack cannot yet exercise EEZ
+The [builder/PBS stack](PBS.md) extends this L1. The EEZ L2 is the next stage. This stack cannot yet exercise EEZ
 cross-chain settlement. The production chain/profile and Core pin are unchanged.
 
 The fixtures use the public `test ... junk` mnemonic and fund its first EVM
 account with test ETH. Use this stack only as an isolated development network;
 Lark staging needs separately provisioned validator keys and accounts. The Engine
 JWT is generated independently and mounted as a Swarm secret.
+
+## Lifecycle command
+
+From the repository root, `sudo bash scripts/local-devnet.sh` accepts:
+
+- `prepare`: create dedicated volumes/JWT and submit genesis preparation once.
+- `start`: require completed preparation, then start/restart the existing chain.
+- `status`: list services and their task state.
+- `check`: submit a finite overlay health job, retrying for up to about 48 minutes
+  for first finality. It prints the job name and commands to inspect its result.
+- `stop`: scale all three runtime services to zero, retaining volumes and secrets.
+
+Preparation and checks are asynchronous; submission success alone is not a
+passing result. The equivalent commands and expected results follow below.
 
 ## Prepare once
 
@@ -22,9 +36,9 @@ sudo docker volume create eez-devnet-414141-validators
 sudo docker volume create eez-devnet-414141-execution
 sudo docker volume create eez-devnet-414141-beacon
 openssl rand -hex 32 | sudo docker secret create eez-devnet-engine-jwt -
-sudo docker stack deploy -c prepare.yml eez-devnet-prep
-sudo docker service ps eez-devnet-prep_prepare --no-trunc
-sudo docker service logs eez-devnet-prep_prepare
+sudo docker stack deploy -c prepare.yml eez-devnet-414141-prep
+sudo docker service ps eez-devnet-414141-prep_prepare --no-trunc
+sudo docker service logs eez-devnet-414141-prep_prepare
 ```
 
 Require task completion and `Prepared private L1 genesis and 64 fixture validators`.
@@ -57,17 +71,20 @@ for each run and keep its result until collected:
 
 ```sh
 sudo docker config create eez-devnet-check-v3 check.sh
-sudo docker service create --name eez-devnet-check-1 --restart-condition none \
+sudo docker service create --detach=true --name eez-devnet-414141-check-next --restart-condition none \
   --network eez-devnet_l1 --config source=eez-devnet-check-v3,target=/check.sh \
   --entrypoint bash \
   ethpandaops/ethereum-genesis-generator@sha256:017f8bdbd454d2fcf4e0f65f6c64b5bc4c991f5846220e9be188145fa85875db /check.sh
-sudo docker service ps eez-devnet-check-1 --no-trunc
-sudo docker service logs eez-devnet-check-1
+sudo docker service ps eez-devnet-414141-check-next --no-trunc
+sudo docker service logs eez-devnet-414141-check-next
 ```
 
 The probe checks chain identity, execution advancement, nonoptimistic beacon
 state and nonzero finalized execution height. Exit 2 means finality is still
-pending; normally allow two to three epochs after successful block production.
+pending; allow several epochs after successful block production. The first
+414141 check exhausted its 24-minute budget before non-genesis finality was
+observed; later beacon state confirmed finalized epoch 4. The lifecycle helper
+therefore allows 48 minutes, retaining failure evidence from earlier checks.
 Container readiness alone does not establish finality or blob availability.
 
 To stop while retaining state:
@@ -82,10 +99,9 @@ migration. Before a destructive reset, stop every consumer, retain required
 evidence and explicitly authorize the exact four volumes and JWT to replace.
 Never regenerate genesis beneath existing execution or consensus datadirs.
 
-The initial live deployment used chain 7331. These files now select fresh
-`eez-devnet-414141-*` volumes; they do not change that running chain. Stop the
-old stack before preparing and starting the replacement. Retain old volumes
-for recovery. Reuse the existing Engine JWT secret rather than recreating it.
+The initial live deployment used chain 7331. On 2026-11-24 it was stopped and
+replaced by chain 414141 using fresh `eez-devnet-414141-*` volumes. The original
+volumes remain available for recovery. The existing Engine JWT secret is reused.
 
 Backups must copy stopped execution/beacon/validator/genesis volumes together,
 retain the JWT securely and record image digests and source revision. Restore

@@ -18,7 +18,7 @@ services:
       - --datadir=/execution
       - --http
       - --http.addr=0.0.0.0
-      - --http.api=eth,net,web3
+      - --http.api=eth,net,web3,admin
       - --authrpc.addr=0.0.0.0
       - --authrpc.jwtsecret=/run/secrets/engine-jwt
       - --disable-discovery
@@ -46,6 +46,7 @@ services:
       - --enable-private-discovery
       - --allow-insecure-genesis-sync
       - --supernode
+      - --builder=http://mev-boost:18550
     volumes:
       - genesis:/genesis:ro
       - beacon:/beacon
@@ -64,6 +65,7 @@ services:
       - --datadir=/validators
       - --beacon-nodes=http://beacon:5052
       - --init-slashing-protection
+      - --builder-proposals
       - --suggested-fee-recipient=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
     volumes:
       - genesis:/genesis:ro

@@ -1,0 +1,32 @@
+version: '3.8'
+services:
+  mev-boost:
+    image: ethpandaops/mev-boost@sha256:47ef3f0c7166cbfc5e925921b6448be7e67b6d47615e9f1f36b098b3905fb223
+    entrypoint: [sh, /boost-start.sh]
+    configs:
+      - source: boost_start_v1
+        target: /boost-start.sh
+    volumes: [genesis:/genesis:ro, pbs:/pbs:ro]
+    networks: [l1]
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.labels.platform.data == true]
+      update_config:
+        order: stop-first
+      rollback_config:
+        order: stop-first
+configs:
+  boost_start_v1:
+    file: ./boost-start.sh
+volumes:
+  genesis:
+    external: true
+    name: eez-devnet-414141-genesis
+  pbs:
+    external: true
+    name: eez-devnet-414141-pbs
+networks:
+  l1:
+    external: true
+    name: eez-devnet_l1

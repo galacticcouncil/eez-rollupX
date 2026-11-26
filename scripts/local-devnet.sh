@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Server-local Swarm L1 lifecycle; run with Docker administration permissions.
+# Server-local Swarm lifecycle; run with Docker administration permissions.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo/deploy/swarm/devnet"
@@ -55,8 +55,35 @@ case "${1:-}" in
     stop)
         docker service scale --detach=true "${stack}_validator=0" "${stack}_beacon=0" "${stack}_execution=0"
         ;;
+    l2-deploy)
+        : "${EEZ_DEVNET_DEPLOY_IMAGE:?Build and select the deployment image first}"
+        if docker service inspect eez-devnet-l2-deploy_deploy >/dev/null 2>&1; then
+            echo 'L2 deployment already submitted. Inspect receipts; do not broadcast again.' >&2
+            exit 1
+        fi
+        for role in deployment broadcast node beacon; do
+            docker volume create "eez-devnet-424242-$role"
+        done
+        docker stack deploy --detach=true --resolve-image never -c l2-deploy.yml eez-devnet-l2-deploy
+        ;;
+    l2-start)
+        : "${EEZ_DEVNET_NODE_IMAGE:?Select the built node image}"
+        : "${EEZ_DEVNET_SIGNER_IMAGE:?Select the built signer image}"
+        state="$(docker service ps --no-trunc --format '{{.CurrentState}}' eez-devnet-l2-deploy_deploy)"
+        [[ "$state" == Complete* ]] || { echo 'Require successful L2 deployment before starting.' >&2; exit 1; }
+        docker stack deploy --detach=true --resolve-image never -c l2.yml eez-devnet-l2
+        ;;
+    l2-status)
+        for role in eez-node eez-proof-signer eez-beacon; do
+            docker service ps "eez-devnet-l2_$role" --no-trunc
+        done
+        ;;
+    l2-stop)
+        docker service scale --detach=true eez-devnet-l2_eez-node=0 \
+            eez-devnet-l2_eez-beacon=0 eez-devnet-l2_eez-proof-signer=0
+        ;;
     *)
-        echo 'usage: bash scripts/local-devnet.sh prepare|start|status|check|check-pbs|stop' >&2
+        echo 'usage: bash scripts/local-devnet.sh prepare|start|status|check|check-pbs|stop|l2-deploy|l2-start|l2-status|l2-stop' >&2
         exit 2
         ;;
 esac

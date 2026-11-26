@@ -1,0 +1,42 @@
+version: '3.8'
+services:
+  deploy:
+    image: ${EEZ_DEVNET_DEPLOY_IMAGE:?Select the locally built deployment image}
+    entrypoint: [bash, /l2-deploy.sh]
+    configs:
+      - source: deploy_v3
+        target: /l2-deploy.sh
+      - source: fixtures_v1
+        target: /l2-fixtures.env
+    volumes:
+      - genesis:/genesis:ro
+      - deployment:/out
+      - broadcast:/repo/contracts/broadcast
+    networks: [l1]
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.labels.platform.data == true]
+      restart_policy:
+        condition: none
+      update_config:
+        order: stop-first
+configs:
+  deploy_v3:
+    file: ./l2-deploy.sh
+  fixtures_v1:
+    file: ./l2-fixtures.env
+volumes:
+  genesis:
+    external: true
+    name: eez-devnet-414141-genesis
+  deployment:
+    external: true
+    name: eez-devnet-424242-deployment
+  broadcast:
+    external: true
+    name: eez-devnet-424242-broadcast
+networks:
+  l1:
+    external: true
+    name: eez-devnet_l1

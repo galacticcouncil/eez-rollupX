@@ -1,0 +1,127 @@
+version: '3.8'
+x-runtime: &runtime
+  replicas: 1
+  placement:
+    constraints: [node.labels.platform.data == true]
+  update_config:
+    order: stop-first
+  rollback_config:
+    order: stop-first
+  restart_policy:
+    condition: on-failure
+x-public-configs: &public-configs
+  - source: start_v2
+    target: /l2-start.sh
+  - source: fixtures_v1
+    target: /l2-fixtures.env
+services:
+  eez-node:
+    image: ${EEZ_DEVNET_NODE_IMAGE:?Select the locally built node image}
+    entrypoint: [sh, /l2-start.sh, node]
+    configs: *public-configs
+    environment:
+      EEZ_L1_CHAIN: devnet
+      EEZ_L1_CHAIN_PATH: /out/l1-genesis.json
+      EEZ_L1_CHAIN_CONFIG: /out/l1-genesis.json
+      EEZ_L1_JWT_SECRET: /run/secrets/engine-jwt
+      EEZ_L1_DATADIR: /data/l1
+      EEZ_L1_HTTP_PORT: '18545'
+      EEZ_L1_AUTH_PORT: '18551'
+      EEZ_L1_CHAIN_ID: '414141'
+      EEZ_L1_RPC_URL: http://127.0.0.1:18545
+      EEZ_L1_BEACON_URL: http://beacon:5052
+      EEZ_L1_TARGET_RPC_URL: http://execution:8545
+      EEZ_L1_BUILDER_RPC_URL: http://builder:8645
+      EEZ_L1_BLOCK_TIME_MS: '12000'
+      EEZ_L2_BLOCK_TIME_MS: '2000'
+      EEZ_PROOF_TIME_MS: '4000'
+      EEZ_SUBMISSION_SLACK_MS: '500'
+      EEZ_BUNDLE_SUBMISSION_LEAD_MS: '7500'
+      EEZ_MAX_SPECULATIVE_DEPTH: '0'
+      EEZ_MAX_USER_TXS_PER_BUNDLE: '50'
+      EEZ_L1_BLOB_SIDECAR_ENCODING: eip7594
+      EEZ_PROVER_URL: http://eez-proof-signer:50061
+      EEZ_WITNESS_DB_PATH: /data/witnesses
+      EEZ_L2_DATADIR: /data/l2
+      EEZ_L2_HTTP_PORT: '18688'
+      EEZ_L2_RPC_URL: http://127.0.0.1:18688
+      EEZ_L1_XCHAIN_PORT: '18999'
+      EEZ_L2_XCHAIN_PORT: '18998'
+      EEZ_L2_AUTH_PORT: '18684'
+      EEZ_L2_P2P_PORT: '30640'
+      # Initial bring-up: poster pays settlement costs; fee quotes come later.
+      EEZ_FEES_L1_TO_L2_ENABLED: 'false'
+      EEZ_FEES_L2_TO_L1_ENABLED: 'false'
+      EEZ_SETTLEMENT_START_AFTER_BLOCK: '3'
+      EEZ_SETTLEMENT_PURE_L2_MODE: always
+      EEZ_SETTLEMENT_MAX_UNSETTLED_L2_BLOCKS: '900'
+      EEZ_SETTLEMENT_BLOB_FULLNESS_BPS: 'off'
+      EEZ_L1_POSTBATCH_MAX_FEE_PER_GAS: '100000000000'
+      EEZ_L1_POSTBATCH_MAX_FEE_PER_BLOB_GAS: '100000000000'
+      EEZ_L1_POSTBATCH_MAX_PRIORITY_FEE: '2000000000'
+      EEZ_L1_POSTBATCH_MIN_PRIORITY_FEE: '1000000000'
+      EEZ_L1_POSTBATCH_EXECUTION_HEADROOM_BPS: '10000'
+      EEZ_L1_POSTBATCH_BLOB_HEADROOM_BPS: '10000'
+      EEZ_L1_POSTBATCH_GAS_MARGIN_BPS: '500'
+      RUST_LOG: info
+    volumes: [deployment:/out:ro, pbs:/pbs:ro, node:/data]
+    secrets:
+      - source: engine_jwt
+        target: engine-jwt
+    networks: [l1]
+    stop_grace_period: 2m
+    deploy: *runtime
+  eez-proof-signer:
+    image: ${EEZ_DEVNET_SIGNER_IMAGE:?Select the locally built signer image}
+    entrypoint: [sh, /l2-start.sh, signer]
+    configs: *public-configs
+    environment:
+      RUST_LOG: info
+    volumes: [deployment:/out:ro]
+    networks: [l1]
+    stop_grace_period: 2m
+    deploy: *runtime
+  eez-beacon:
+    image: sigp/lighthouse@sha256:9e71f6db59d358acb43719fcc5240952811821cc2fc4c3cfa90e57f2e4b38288
+    entrypoint: [bash, /l2-beacon-start.sh]
+    configs:
+      - source: beacon_start_v1
+        target: /l2-beacon-start.sh
+    volumes: [genesis:/genesis:ro, pbs:/pbs:ro, beacon:/beacon]
+    secrets:
+      - source: engine_jwt
+        target: engine-jwt
+    networks: [l1]
+    stop_grace_period: 2m
+    deploy: *runtime
+configs:
+  start_v2:
+    file: ./l2-start.sh
+  fixtures_v1:
+    file: ./l2-fixtures.env
+  beacon_start_v1:
+    file: ./l2-beacon-start.sh
+volumes:
+  genesis:
+    external: true
+    name: eez-devnet-414141-genesis
+  pbs:
+    external: true
+    name: eez-devnet-414141-pbs
+  deployment:
+    external: true
+    name: eez-devnet-424242-deployment
+  node:
+    external: true
+    name: eez-devnet-424242-node
+  beacon:
+    external: true
+    name: eez-devnet-424242-beacon
+networks:
+  l1:
+    external: true
+    name: eez-devnet_l1
+secrets:
+  engine_jwt:
+    external: true
+    name: eez-devnet-engine-jwt

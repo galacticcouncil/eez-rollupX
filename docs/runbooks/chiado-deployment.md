@@ -288,7 +288,7 @@ requires. Merged into the base, the additions are:
     "hydration": { "rulesVersion": 1, "oracleUpdater": "0x…", "peplKeeper": "0x…" }
   },
   "alloc": {
-    "0x0000000000000000000000000000000000000800": { "nonce": "0x1" }
+    "0x0000000000000000000000000000000000000800": { "nonce": "0x1", "balance": "0x0" }
   }
 }
 ```
@@ -313,7 +313,9 @@ checks and compatibility rules are in the
   from network creation. Images without this support reject the genesis, and
   rolling back to them stops the network.
 
-Deployment with this section has not been exercised. Before any broadcast,
+The [local Swarm profile](../hydration/local-devnet.md) has exercised deployment,
+counter execution and ECDSA settlement with public test roles. This does not
+establish Chiado deployment or full Hydration qualification. Before any broadcast,
 render the base with `scripts/update-eezl2-genesis.sh --render … --base PATH`
 (the script's usage lists the required arguments) and check that the output
 keeps the section and the counter account.

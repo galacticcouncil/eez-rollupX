@@ -1,9 +1,10 @@
 # Server development L1
 
 First stage of the server devnet/Lark deployment path: private Ethereum PoS L1,
-L1 chain ID 414141, planned L2 chain ID 424242, 12-second slots, 64 validators, Fulu and BPO1 from genesis
+L1 chain ID 414141, L2 chain ID 424242, 12-second slots, 64 validators, Fulu and BPO1 from genesis
 (15 maximum / 10 target blobs). Mainnet preset epochs remain 32 slots.
-The [builder/PBS stack](PBS.md) extends this L1. The EEZ L2 is the next stage. This stack cannot yet exercise EEZ
+The [builder/PBS stack](PBS.md) extends this L1. The [EEZ L2 runbook](L2.md)
+adds the local Hydration network. L1 health alone does not establish EEZ
 cross-chain settlement. The production chain/profile and Core pin are unchanged.
 
 The fixtures use the public `test ... junk` mnemonic and fund its first EVM

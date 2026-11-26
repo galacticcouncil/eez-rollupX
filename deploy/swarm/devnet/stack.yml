@@ -1,4 +1,9 @@
 version: '3.8'
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '20m'
+    max-file: '3'
 x-runtime: &runtime
   replicas: 1
   placement:
@@ -11,6 +16,7 @@ x-runtime: &runtime
     condition: on-failure
 services:
   execution:
+    logging: *logging
     image: ghcr.io/paradigmxyz/reth@sha256:0d16db7cfaa9e2aa8dc87664f94fd87d9a34f1a79d7eeded1c4867f91f9c13d4
     command:
       - node
@@ -32,6 +38,7 @@ services:
     stop_grace_period: 2m
     deploy: *runtime
   beacon:
+    logging: *logging
     image: sigp/lighthouse@sha256:9e71f6db59d358acb43719fcc5240952811821cc2fc4c3cfa90e57f2e4b38288
     command:
       - lighthouse
@@ -57,6 +64,7 @@ services:
     stop_grace_period: 2m
     deploy: *runtime
   validator:
+    logging: *logging
     image: sigp/lighthouse@sha256:9e71f6db59d358acb43719fcc5240952811821cc2fc4c3cfa90e57f2e4b38288
     command:
       - lighthouse

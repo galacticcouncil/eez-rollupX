@@ -12,13 +12,75 @@ account with test ETH. Use this stack only as an isolated development network;
 Lark staging needs separately provisioned validator keys and accounts. The Engine
 JWT is generated independently and mounted as a Swarm secret.
 
+## Daily use: the complete installed devnet
+
+After L1, PBS and L2 have been provisioned, run from the repository root:
+
+```sh
+sudo bash scripts/local-devnet.sh down
+sudo bash scripts/local-devnet.sh up
+sudo bash scripts/local-devnet.sh status-all
+sudo bash scripts/local-devnet.sh check-all
+```
+
+`down` stops all 13 runtime services in dependency order, waiting for actual
+tasks to stop: Composer first, validator next, remaining consumers, canonical
+beacon, then execution/PostgreSQL/Redis. `up` resumes those same services in
+reverse dependency groups. It needs no image overrides and never reruns genesis,
+bootstrap, funding or contract deployment. Existing images, volumes, secrets,
+validator signing history and deployment records remain paired.
+
+Both commands require a complete installation before changing anything and wait
+up to 180 seconds per group (`EEZ_DEVNET_WAIT_SECONDS`, positive 1–9999). A timeout
+stops the command and reports the service; inspect its tasks/logs before retrying.
+Run one lifecycle operation at a time. `up` waits for running tasks, while
+`check-all` submits a separate finite readiness job; require its successful exit.
+That job checks L1 advancement/finality, PBS, L2 advancement, saved configuration,
+the counter read and a non-genesis safe head. It does not broadcast a transaction.
+
+The original `start`/`stop` commands below control **L1 only**, and `l2-start` /
+`l2-stop` control L2 only. Use `up` / `down` for daily whole-network operation.
+Use provisioning commands only for first setup, not to resume an existing chain.
+Unsettled requests and retry counters remain in memory; clients may need to
+resubmit work after restart.
+
+On 2026-11-26, complete `down` / `up` passed on the same volumes. Checks preserved
+settled L2 block 1368, counter value 2, the prior receipt and settlement correlation;
+a fresh counter increment 2 → 3 settled through L2 block 2208. This was a controlled
+stop/start, not a crash, overnight-outage or backup/restore exercise.
+
+## Storage limits
+
+All checked-in runtime/setup services and lifecycle probes use Docker `json-file`
+logging with `max-size=20m` and `max-file=3`: approximately 60 MB per task.
+The builder defaults to `info` logging. Limits apply to new tasks, including
+replacements; they do not retroactively shrink old container logs. Retained
+diagnostic jobs and service histories still consume space. Archive required
+failure evidence before removing a specific old task; do not run broad pruning.
+
+Compiler caches are separate from chain data. On 2026-11-26, removing only the
+two unused EEZ node/signer BuildKit target-cache records reclaimed 8.3 GB;
+images, Cargo registry caches, host `target/`, chain data and recovery volumes
+were preserved. A future source build will recreate compiler caches. To reclaim
+them again, inspect `sudo docker buildx du --format json`, identify reclaimable
+records whose descriptions name `/eez-node-target` or `/eez-proof-signer-target`,
+and prune only their exact IDs with both `id=...` and `type=exec.cachemount`
+filters. Do not prune caches while builds are running. No daemon-wide GC policy
+is installed because this server also builds unrelated services.
+
+Measure physical allocation with `du`, not just apparent database file size:
+sparse files can report gigabytes while allocating only megabytes. Witness
+cleanup already follows the L1-finalized L2 floor; do not delete witness or
+chain databases to manage routine disk usage. Pair future pruning changes with
+replay/recovery validation. Explorers will add their own index storage.
+
 ## Lifecycle command
 
 From the repository root, `sudo bash scripts/local-devnet.sh` accepts:
 
 - `prepare`: create dedicated volumes/JWT and submit genesis preparation once.
 - `start`: require completed preparation, then start/restart the existing chain.
-- `status`: list services and their task state.
+- `status`: list L1-related services and their task state.
 - `check`: submit a finite overlay health job, retrying for up to about 48 minutes
   for first finality. It prints the job name and commands to inspect its result.
 - `stop`: scale all three runtime services to zero, retaining volumes and secrets.
@@ -73,6 +135,7 @@ for each run and keep its result until collected:
 ```sh
 sudo docker config create eez-devnet-check-v3 check.sh
 sudo docker service create --detach=true --name eez-devnet-414141-check-next --restart-condition none \
+  --log-driver json-file --log-opt max-size=20m --log-opt max-file=3 \
   --network eez-devnet_l1 --config source=eez-devnet-check-v3,target=/check.sh \
   --entrypoint bash \
   ethpandaops/ethereum-genesis-generator@sha256:017f8bdbd454d2fcf4e0f65f6c64b5bc4c991f5846220e9be188145fa85875db /check.sh
@@ -91,8 +154,10 @@ Container readiness alone does not establish finality or blob availability.
 To stop while retaining state:
 
 ```sh
-sudo docker stack rm eez-devnet
+sudo docker service scale eez-devnet_validator=0 eez-devnet_beacon=0 eez-devnet_execution=0
 ```
+
+This example stops L1 only. For the complete installed devnet, use `down` above.
 
 Restart using the same stack, volumes and JWT. Genesis and validator slashing
 history must remain paired. There is no automatic reset or supported chain

@@ -50,3 +50,12 @@ class DevnetStackTest(unittest.TestCase):
         self.assertEqual(manifest["l2_chain_id"], 424242)
         self.assertIn(f'export CHAIN_ID={manifest["l1_chain_id"]} ', (ROOT / "prepare.sh").read_text())
         self.assertIn(hex(manifest["l1_chain_id"]), (ROOT / "check.sh").read_text())
+
+    def test_every_runtime_and_setup_task_has_bounded_logs(self):
+        for filename in ("stack.yml", "relay.yml", "builder.yml", "boost.yml", "l2.yml",
+                         "prepare.yml", "pbs-bootstrap.yml", "l2-deploy.yml"):
+            stack = yaml.safe_load((ROOT / filename).read_text())
+            for name, service in stack["services"].items():
+                self.assertEqual(service["logging"], {
+                    "driver": "json-file", "options": {"max-size": "20m", "max-file": "3"}},
+                    f"{filename}: {name}")

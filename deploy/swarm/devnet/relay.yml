@@ -1,4 +1,9 @@
 version: '3.8'
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '20m'
+    max-file: '3'
 x-relay-deploy: &relay-deploy
   replicas: 1
   placement:
@@ -10,6 +15,7 @@ x-relay-deploy: &relay-deploy
   restart_policy:
     condition: on-failure
 x-relay: &relay
+  logging: *logging
   image: ethpandaops/mev-boost-relay@sha256:3600f04fcaf0bbb231f4737470f094fdf2314db54b4853197fa369aea90f8b19
   entrypoint: [sh, /relay-start.sh]
   configs:
@@ -27,6 +33,7 @@ x-relay: &relay
   deploy: *relay-deploy
 services:
   postgres:
+    logging: *logging
     image: postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
     environment:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
@@ -49,6 +56,7 @@ services:
     stop_grace_period: 1m
     deploy: *relay-deploy
   redis:
+    logging: *logging
     image: redis:alpine@sha256:becdda6c7f4b3fb42e42fd7f120bbf5c54c4caaaf16f26da24e4563d2c1f0576
     command: [redis-server, --appendonly, 'yes']
     volumes: [redis:/data]

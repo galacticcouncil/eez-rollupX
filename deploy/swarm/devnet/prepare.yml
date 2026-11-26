@@ -1,6 +1,11 @@
 version: '3.8'
 services:
   prepare:
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '3'
     image: ethpandaops/ethereum-genesis-generator@sha256:017f8bdbd454d2fcf4e0f65f6c64b5bc4c991f5846220e9be188145fa85875db
     entrypoint: [bash, /prepare.sh]
     configs:

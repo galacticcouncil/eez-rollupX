@@ -74,3 +74,83 @@ if [[ "$1 $2" == 'service ps' ]]; then printf '%s\\n' "$PREP_STATE"; exit 0; fi
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(commands.strip(), "service scale --detach=true eez-devnet-l2_eez-node=0 "
                          "eez-devnet-l2_eez-beacon=0 eez-devnet-l2_eez-proof-signer=0")
+
+
+class WholeNetworkTest(unittest.TestCase):
+    def run_action(self, action, **extra):
+        with tempfile.TemporaryDirectory(prefix="eez-network-lifecycle-") as directory:
+            root = Path(directory)
+            docker = root / "docker"
+            docker.write_text('''#!/usr/bin/env bash
+set -eu
+printf '%s\\n' "$*" >> "$COMMAND_LOG"
+case "$1 $2" in
+    'service inspect') test "${MISSING_SERVICE:-0}" = 0 ;;
+    'service scale')
+        shift 3
+        for assignment in "$@"; do
+            printf '%s' "${assignment##*=}" > "$STATE_DIR/${assignment%=*}"
+        done ;;
+    'service ps')
+        name="${@: -1}"
+        if [[ "$name" == "${FAULT_SERVICE:-}" ]]; then
+            echo 'Running 2 minutes ago'
+        elif [[ "$(cat "$STATE_DIR/$name")" == 1 ]]; then
+            echo 'Running 1 second ago'
+        else
+            echo 'Shutdown 1 second ago'
+        fi ;;
+    *) exit 91 ;;
+esac
+''')
+            docker.chmod(0o755)
+            log = root / "commands"
+            result = subprocess.run(["bash", str(SCRIPT), action], text=True,
+                capture_output=True, timeout=15, env={**os.environ,
+                "PATH": f"{root}:{os.environ['PATH']}", "COMMAND_LOG": str(log),
+                "STATE_DIR": str(root), **extra})
+            return result, log.read_text() if log.exists() else ""
+
+    def test_down_waits_for_writers_then_stops_only_thirteen_owned_services(self):
+        result, log = self.run_action("down")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        scales = [line for line in log.splitlines() if line.startswith('service scale')]
+        self.assertIn('eez-devnet-l2_eez-node=0', scales[0])
+        self.assertIn('eez-devnet_validator=0', scales[1])
+        self.assertIn('eez-devnet_execution=0', scales[-1])
+        assignments = [word for line in scales for word in line.split() if word.endswith('=0')]
+        self.assertEqual(len(set(assignments)), 13)
+        self.assertNotIn('stack deploy', log)
+        self.assertNotIn('volume', log)
+        self.assertNotIn('platform_', log)
+
+    def test_up_reuses_services_and_starts_node_after_database_and_signer(self):
+        result, log = self.run_action("up")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        scales = [line for line in log.splitlines() if line.startswith('service scale')]
+        self.assertIn('eez-devnet-pbs_postgres=1', scales[0])
+        self.assertIn('eez-devnet-l2_eez-proof-signer=1', scales[1])
+        self.assertIn('eez-devnet-l2_eez-node=1', scales[-1])
+        assignments = [word for line in scales for word in line.split() if word.endswith('=1')]
+        self.assertEqual(len(set(assignments)), 13)
+        self.assertNotIn('stack deploy', log)
+        self.assertNotIn('volume', log)
+        self.assertNotIn('prepare', '\n'.join(scales))
+
+    def test_missing_installation_is_rejected_before_any_scaling(self):
+        result, log = self.run_action("up", MISSING_SERVICE="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('service scale', log)
+
+    def test_shutdown_timeout_does_not_stop_downstream_dependencies(self):
+        result, log = self.run_action("down", EEZ_DEVNET_WAIT_SECONDS="1",
+                                     FAULT_SERVICE="eez-devnet-l2_eez-node")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Timed out waiting', result.stderr)
+        self.assertNotIn('eez-devnet_validator=0', log)
+
+    def test_invalid_wait_limits_never_mutate_resources(self):
+        for value in ("0", "-1", "10000", "invalid"):
+            result, log = self.run_action("down", EEZ_DEVNET_WAIT_SECONDS=value)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(log, "")

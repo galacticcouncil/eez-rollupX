@@ -1,4 +1,9 @@
 version: '3.8'
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '20m'
+    max-file: '3'
 x-runtime: &runtime
   replicas: 1
   placement:
@@ -16,6 +21,7 @@ x-public-configs: &public-configs
     target: /l2-fixtures.env
 services:
   eez-node:
+    logging: *logging
     image: ${EEZ_DEVNET_NODE_IMAGE:?Select the locally built node image}
     entrypoint: [sh, /l2-start.sh, node]
     configs: *public-configs
@@ -72,6 +78,7 @@ services:
     stop_grace_period: 2m
     deploy: *runtime
   eez-proof-signer:
+    logging: *logging
     image: ${EEZ_DEVNET_SIGNER_IMAGE:?Select the locally built signer image}
     entrypoint: [sh, /l2-start.sh, signer]
     configs: *public-configs
@@ -82,6 +89,7 @@ services:
     stop_grace_period: 2m
     deploy: *runtime
   eez-beacon:
+    logging: *logging
     image: sigp/lighthouse@sha256:9e71f6db59d358acb43719fcc5240952811821cc2fc4c3cfa90e57f2e4b38288
     entrypoint: [bash, /l2-beacon-start.sh]
     configs:

@@ -1,6 +1,11 @@
 version: '3.8'
 services:
   deploy:
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '3'
     image: ${EEZ_DEVNET_DEPLOY_IMAGE:?Select the locally built deployment image}
     entrypoint: [bash, /l2-deploy.sh]
     configs:

@@ -1,5 +1,5 @@
 log_json = true
-log_level = "info,rbuilder=debug"
+log_level = "info"
 chain = "/genesis/metadata/genesis.json"
 reth_datadir = "/builder"
 # Public Ethereum-package fixture, prefunded explicitly on this private L1.

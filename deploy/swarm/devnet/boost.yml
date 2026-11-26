@@ -1,6 +1,11 @@
 version: '3.8'
 services:
   mev-boost:
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '3'
     image: ethpandaops/mev-boost@sha256:47ef3f0c7166cbfc5e925921b6448be7e67b6d47615e9f1f36b098b3905fb223
     entrypoint: [sh, /boost-start.sh]
     configs:

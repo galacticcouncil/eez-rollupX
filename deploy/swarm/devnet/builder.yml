@@ -1,4 +1,9 @@
 version: '3.8'
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '20m'
+    max-file: '3'
 x-deploy: &deploy
   replicas: 1
   placement:
@@ -11,6 +16,7 @@ x-deploy: &deploy
     condition: on-failure
 services:
   builder:
+    logging: *logging
     image: eez-devnet-builder:261124-pbs-v1
     environment:
       CL_ENDPOINT: http://builder-beacon:5052
@@ -26,6 +32,7 @@ services:
     stop_grace_period: 2m
     deploy: *deploy
   builder-beacon:
+    logging: *logging
     image: sigp/lighthouse@sha256:9e71f6db59d358acb43719fcc5240952811821cc2fc4c3cfa90e57f2e4b38288
     entrypoint: [bash, /builder-beacon-start.sh]
     configs:

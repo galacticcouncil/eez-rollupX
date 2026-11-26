@@ -123,11 +123,17 @@ Inspect service logs/tasks through Swarmpit or `sudo docker service logs/ps` for
 `eez-devnet-pbs_relay-api`, `eez-devnet-pbs_relay-housekeeper`,
 `eez-devnet-pbs_redis`, `eez-devnet-pbs_postgres`, and `eez-devnet-boost_mev-boost`.
 
+For daily whole-network operation use `local-devnet.sh down` / `up` and
+`check-all` from the repository root. The [complete lifecycle](README.md#daily-use-the-complete-installed-devnet)
+includes all PBS services and was exercised with preserved state and fresh
+settlement. Runtime tasks now rotate Docker logs at 20 MB × 3 files; builder
+logging defaults to info. Keep the same service specifications and volumes.
+
 Stopping just `local-devnet.sh stop` stops the canonical L1 writers. To stop
 the rest of PBS while preserving state, stop L2 consumers and relay writers,
 then scale the remaining PBS services to zero too.
 Keep database, Redis, PBS bindings and signing secrets for restart. Do not rotate
-keys, delete volumes or recreate databases as part of ordinary restart. Builder
+keys, delete volumes or recreate databases as part of ordinary restart. PBS
 recovery still requires the same L1 genesis, relay signing key, database and Redis
 state. This remains a single-host development network.
 
@@ -166,6 +172,13 @@ The historical shared provisioning task was scaled to zero and its credential
 mounts removed after migration. New developers initialize directly through
 `relay.yml`; the separate shared-database provisioning stack has been removed.
 
+Post-migration validation passed: relay/canonical payload lookup remained
+available, and a fresh Hydration canary incremented the counter from 1 to 2 in
+L2 block 1363. Its settlement advanced the on-chain commitment to canonical
+L2 block 1368 (`0x49f23751709ff15e287b77403b892e71595a4c9bc2fce3fb8567ee37adbc00f7`).
+Service inspection confirmed PostgreSQL/Redis use only the private stack overlay
+and relay tasks use only that overlay plus L1; none uses the shared DB network.
+
 ## Executed validation, 2026-11-26
 
 L1 414141: a canary bundle produced relay-delivered canonical block 12529,
@@ -181,5 +194,7 @@ Initial failures are retained in Swarm task history: relay key prefix mismatch,
 builder peering during canonical restart, early candidate timing, a receipt
 query without a timeout, a probe racing startup, and an in-memory bundle lost
 by the outgoing task during rollout. These later passes do not erase those
-failures or establish durable recovery. Blob canaries, refunds, full restart/
-restore and EEZ semantic settlement are still unverified.
+failures or establish durable recovery. Local counter settlement with blob
+publication is recorded in the [L2 runbook](L2.md) and the migration above.
+Cross-chain calls, independent blob reconstruction, refunds and full L1/PBS
+restart/restore remain unqualified.

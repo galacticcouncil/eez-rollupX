@@ -1,0 +1,223 @@
+version: '3.8'
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '20m'
+    max-file: '3'
+x-deploy: &deploy
+  replicas: 1
+  placement:
+    constraints: [node.labels.platform.data == true]
+  update_config:
+    order: stop-first
+  rollback_config:
+    order: stop-first
+  restart_policy:
+    condition: on-failure
+    delay: 5s
+x-backend-env: &backend-env
+  ETHEREUM_JSONRPC_VARIANT: geth
+  APPLICATION_MODE: all
+  PORT: '4000'
+  API_V2_ENABLED: 'true'
+  ECTO_SSL_MODE: disable
+  DISABLE_FILE_LOGGING: 'true'
+  DISABLE_MARKET: 'true'
+  NFT_MEDIA_HANDLER_ENABLED: 'false'
+  INDEXER_DISABLE_PENDING_TRANSACTIONS_FETCHER: 'true'
+  INDEXER_CATCHUP_BLOCKS_BATCH_SIZE: '25'
+  INDEXER_CATCHUP_BLOCKS_CONCURRENCY: '2'
+  INDEXER_INTERNAL_TRANSACTIONS_CONCURRENCY: '2'
+  INDEXER_RECEIPTS_CONCURRENCY: '2'
+  INDEXER_COIN_BALANCES_CONCURRENCY: '2'
+  INDEXER_BLOCK_REWARD_CONCURRENCY: '2'
+  POOL_SIZE: '10'
+  POOL_SIZE_API: '5'
+  ERL_FLAGS: '+S 2:2'
+  CHAIN_SPEC_PROCESSING_DELAY: 1s
+  MICROSERVICE_SC_VERIFIER_ENABLED: 'true'
+  MICROSERVICE_SC_VERIFIER_URL: http://verifier:8050/
+  MICROSERVICE_SC_VERIFIER_TYPE: sc_verifier
+x-backend: &backend
+  image: ${EEZ_DEVNET_BLOCKSCOUT_IMAGE:?Select the built backend fork image}
+  entrypoint: [sh, /explorer-start.sh]
+  configs:
+    - source: backend_start_v1
+      target: /explorer-start.sh
+  logging: *logging
+  networks: [explorers, l1]
+  stop_grace_period: 2m
+  deploy:
+    <<: *deploy
+    resources:
+      limits:
+        cpus: '1.0'
+        memory: 2G
+x-frontend-env: &frontend-env
+  HOSTNAME: 0.0.0.0
+  PORT: '3000'
+  NEXT_PUBLIC_API_PROTOCOL: http
+  NEXT_PUBLIC_API_WEBSOCKET_PROTOCOL: ws
+  NEXT_PUBLIC_USE_NEXT_JS_PROXY: 'true'
+  NEXT_PUBLIC_APP_PROTOCOL: http
+  NEXT_PUBLIC_APP_HOST: localhost
+  NEXT_PUBLIC_NETWORK_CURRENCY_NAME: Test Ether
+  NEXT_PUBLIC_NETWORK_CURRENCY_SYMBOL: ETH
+  NEXT_PUBLIC_NETWORK_CURRENCY_DECIMALS: '18'
+  NEXT_PUBLIC_IS_TESTNET: 'true'
+  NEXT_PUBLIC_HAS_BEACON_CHAIN: 'false'
+  NEXT_PUBLIC_WEB3_WALLETS: none
+x-frontend: &frontend
+  image: ${EEZ_DEVNET_EXPLORER_FRONTEND_IMAGE:?Select a compatible frontend image}
+  command: [bash, /browser.sh]
+  configs:
+    - source: browser_v1
+      target: /browser.sh
+  networks: [explorers]
+  logging: *logging
+  deploy: *deploy
+x-gateway: &gateway
+  image: nginx@sha256:4a73073bd557c65b759505da037898b61f1be6cbcc3c2c3aeac22d2a470c1752
+  configs:
+    - source: gateway_v1
+      target: /etc/nginx/templates/nginx.conf.template
+  networks: [explorers]
+  logging: *logging
+  deploy: *deploy
+services:
+  postgres:
+    image: postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+    secrets:
+      - source: postgres_password
+        target: postgres-password
+      - source: l1_password
+        target: l1-db-password
+      - source: l2_password
+        target: l2-db-password
+    configs:
+      - source: postgres_init_v1
+        target: /docker-entrypoint-initdb.d/10-explorers.sh
+        mode: 0555
+    volumes: [postgres:/var/lib/postgresql/data]
+    networks: [explorers]
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres -d postgres']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    stop_grace_period: 1m
+    deploy: *deploy
+  verifier:
+    image: ghcr.io/blockscout/smart-contract-verifier@sha256:c9e4e022ba2b1cc24fe70e581d835e873c6c374545b3a0fd209e16ff03f93d78
+    environment:
+      SMART_CONTRACT_VERIFIER__SERVER__HTTP__ADDR: 0.0.0.0:8050
+    networks: [explorers]
+    logging: *logging
+    deploy: *deploy
+  l1-blockscout:
+    <<: *backend
+    environment:
+      <<: *backend-env
+      EXPLORER_CHAIN: l1
+      CHAIN_ID: '414141'
+      ETHEREUM_JSONRPC_HTTP_URL: http://execution:8545
+      ETHEREUM_JSONRPC_TRACE_URL: http://execution:8545
+      CHAIN_SPEC_PATH: /out/l1-genesis.json
+    secrets:
+      - source: l1_password
+        target: db-password
+      - source: l1_web_secret
+        target: web-secret
+    volumes: [deployment:/out:ro, l1_cache:/app/dets]
+  l2-blockscout:
+    <<: *backend
+    environment:
+      <<: *backend-env
+      EXPLORER_CHAIN: l2
+      CHAIN_ID: '424242'
+      ETHEREUM_JSONRPC_HTTP_URL: http://eez-node:18688
+      ETHEREUM_JSONRPC_TRACE_URL: http://eez-node:18688
+      CHAIN_SPEC_PATH: /out/l2-genesis.json
+    secrets:
+      - source: l2_password
+        target: db-password
+      - source: l2_web_secret
+        target: web-secret
+    volumes: [deployment:/out:ro, l2_cache:/app/dets]
+  l1-web:
+    <<: *frontend
+    environment:
+      <<: *frontend-env
+      NEXT_PUBLIC_API_HOST: l1-blockscout:4000
+      NEXT_PUBLIC_NETWORK_ID: '414141'
+      NEXT_PUBLIC_NETWORK_NAME: Hydration Devnet L1
+      NEXT_PUBLIC_NETWORK_SHORT_NAME: Devnet L1
+  l2-web:
+    <<: *frontend
+    environment:
+      <<: *frontend-env
+      NEXT_PUBLIC_API_HOST: l2-blockscout:4000
+      NEXT_PUBLIC_NETWORK_ID: '424242'
+      NEXT_PUBLIC_NETWORK_NAME: Hydration Devnet L2
+      NEXT_PUBLIC_NETWORK_SHORT_NAME: Devnet L2
+      NEXT_PUBLIC_VIEWS_BLOCK_HIDDEN_FIELDS: '["burnt_fees"]'
+      NEXT_PUBLIC_VIEWS_TX_HIDDEN_FIELDS: '["burnt_fees"]'
+  l1-gateway:
+    <<: *gateway
+    environment:
+      EXPLORER_API_HOST: l1-blockscout
+      EXPLORER_WEB_HOST: l1-web
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+  l2-gateway:
+    <<: *gateway
+    environment:
+      EXPLORER_API_HOST: l2-blockscout
+      EXPLORER_WEB_HOST: l2-web
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+configs:
+  backend_start_v1:
+    file: ./explorer-start.sh
+  postgres_init_v1:
+    file: ./explorer-postgres-init.sh
+  browser_v1:
+    file: ../../explorers/blockscout-browser.sh
+  gateway_v1:
+    file: ./explorer-nginx.conf.template
+volumes:
+  postgres:
+    external: true
+    name: eez-devnet-explorers-postgres
+  l1_cache:
+    external: true
+    name: eez-devnet-414141-explorer-cache
+  l2_cache:
+    external: true
+    name: eez-devnet-424242-explorer-cache
+  deployment:
+    external: true
+    name: eez-devnet-424242-deployment
+networks:
+  l1:
+    external: true
+    name: eez-devnet_l1
+  explorers:
+    driver: overlay
+secrets:
+  postgres_password:
+    external: true
+    name: eez-devnet-explorer-postgres-password
+  l1_password:
+    external: true
+    name: eez-devnet-explorer-l1-password
+  l2_password:
+    external: true
+    name: eez-devnet-explorer-l2-password
+  l1_web_secret:
+    external: true
+    name: eez-devnet-explorer-l1-web-secret
+  l2_web_secret:
+    external: true
+    name: eez-devnet-explorer-l2-web-secret

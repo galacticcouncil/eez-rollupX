@@ -24,7 +24,7 @@ services:
       - --datadir=/execution
       - --http
       - --http.addr=0.0.0.0
-      - --http.api=eth,net,web3,admin
+      - --http.api=eth,net,web3,admin,debug
       - --authrpc.addr=0.0.0.0
       - --authrpc.jwtsecret=/run/secrets/engine-jwt
       - --disable-discovery

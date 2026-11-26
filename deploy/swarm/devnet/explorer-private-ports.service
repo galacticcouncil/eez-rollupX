@@ -1,0 +1,13 @@
+[Unit]
+Description=Restrict EEZ explorer backends to local proxies and SSH tunnels
+Requires=docker.service
+After=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/eez-explorer-private-ports
+
+[Install]
+WantedBy=docker.service

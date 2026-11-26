@@ -85,7 +85,12 @@ class WholeNetworkTest(unittest.TestCase):
 set -eu
 printf '%s\\n' "$*" >> "$COMMAND_LOG"
 case "$1 $2" in
-    'service inspect') test "${MISSING_SERVICE:-0}" = 0 ;;
+    'service inspect')
+        if [[ "${@: -1}" == eez-devnet-explorers_postgres ]]; then
+            test "${EXPLORERS_INSTALLED:-0}" = 1
+        else
+            test "${MISSING_SERVICE:-0}" = 0
+        fi ;;
     'service scale')
         shift 3
         for assignment in "$@"; do
@@ -136,6 +141,15 @@ esac
         self.assertNotIn('stack deploy', log)
         self.assertNotIn('volume', log)
         self.assertNotIn('prepare', '\n'.join(scales))
+
+    def test_down_includes_installed_optional_explorers_before_chain_services(self):
+        result, log = self.run_action("down", EXPLORERS_INSTALLED="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        scales = [line for line in log.splitlines() if line.startswith('service scale')]
+        self.assertIn('eez-devnet-explorers_l2-blockscout=0', scales[0])
+        self.assertIn('eez-devnet-explorers_postgres=0', scales[-1])
+        assignments = [word for line in scales for word in line.split() if word.endswith('=0')]
+        self.assertEqual(len(set(assignments)), 21)
 
     def test_missing_installation_is_rejected_before_any_scaling(self):
         result, log = self.run_action("up", MISSING_SERVICE="1")

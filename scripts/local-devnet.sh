@@ -15,6 +15,12 @@ runtime_services=(
     eez-devnet-boost_mev-boost
     eez-devnet-l2_eez-proof-signer eez-devnet-l2_eez-beacon eez-devnet-l2_eez-node
 )
+explorer_apps=(
+    eez-devnet-explorers_l1-blockscout eez-devnet-explorers_l2-blockscout
+    eez-devnet-explorers_l1-web eez-devnet-explorers_l2-web
+    eez-devnet-explorers_l1-gateway eez-devnet-explorers_l2-gateway
+    eez-devnet-explorers_verifier
+)
 
 scale_group() {
     local wanted="$1" service states state running active deadline
@@ -53,7 +59,13 @@ case "${1:-}" in
         [[ "$wait_seconds" =~ ^[1-9][0-9]{0,3}$ ]] || { echo 'EEZ_DEVNET_WAIT_SECONDS must be 1..9999.' >&2; exit 1; }
         # Check the entire installation before making a partial lifecycle change.
         docker service inspect "${runtime_services[@]}" >/dev/null
+        have_explorers=false
+        if docker service inspect eez-devnet-explorers_postgres >/dev/null 2>&1; then
+            docker service inspect "${explorer_apps[@]}" >/dev/null
+            have_explorers=true
+        fi
         if [[ "$1" == down ]]; then
+            if "$have_explorers"; then scale_group 0 "${explorer_apps[@]}"; fi
             scale_group 0 eez-devnet-l2_eez-node
             scale_group 0 eez-devnet_validator
             scale_group 0 eez-devnet-l2_eez-beacon eez-devnet-l2_eez-proof-signer \
@@ -61,21 +73,64 @@ case "${1:-}" in
                 eez-devnet-boost_mev-boost eez-devnet-pbs_relay-api eez-devnet-pbs_relay-housekeeper
             scale_group 0 eez-devnet_beacon
             scale_group 0 eez-devnet_execution eez-devnet-pbs_postgres eez-devnet-pbs_redis
+            if "$have_explorers"; then scale_group 0 eez-devnet-explorers_postgres; fi
             echo 'Devnet stopped. All volumes, secrets, images and deployment records retained.'
         else
             scale_group 1 eez-devnet-pbs_postgres eez-devnet-pbs_redis eez-devnet_execution
+            if "$have_explorers"; then scale_group 1 eez-devnet-explorers_postgres; fi
             scale_group 1 eez-devnet_beacon eez-devnet-boost_mev-boost eez-devnet-l2_eez-proof-signer
             scale_group 1 eez-devnet-pbs_relay-housekeeper eez-devnet-pbs_relay-api \
                 eez-devnet-builder_builder eez-devnet-builder_builder-beacon
             scale_group 1 eez-devnet_validator
             scale_group 1 eez-devnet-l2_eez-beacon eez-devnet-l2_eez-node
+            if "$have_explorers"; then scale_group 1 "${explorer_apps[@]}"; fi
             echo 'Devnet runtime tasks started. Run check-all for RPC/consensus readiness; task state alone is not semantic validation.'
         fi
         ;;
     status-all)
-        for component in eez-devnet eez-devnet-pbs eez-devnet-builder eez-devnet-boost eez-devnet-l2; do
+        for component in eez-devnet eez-devnet-pbs eez-devnet-builder eez-devnet-boost eez-devnet-l2 eez-devnet-explorers; do
             docker service ls --filter "label=com.docker.stack.namespace=$component"
         done
+        ;;
+    explorer-prepare)
+        for role in postgres l1 l2; do
+            secret="eez-devnet-explorer-$role-password"
+            if ! docker secret inspect "$secret" >/dev/null 2>&1; then
+                openssl rand -hex 32 | docker secret create "$secret" -
+            fi
+        done
+        for chain in l1 l2; do
+            secret="eez-devnet-explorer-$chain-web-secret"
+            if ! docker secret inspect "$secret" >/dev/null 2>&1; then
+                openssl rand -base64 64 | docker secret create "$secret" -
+            fi
+        done
+        for volume in eez-devnet-explorers-postgres eez-devnet-414141-explorer-cache eez-devnet-424242-explorer-cache; do
+            docker volume create "$volume"
+        done
+        ;;
+    explorer-start)
+        : "${EEZ_DEVNET_BLOCKSCOUT_IMAGE:?Select the built backend fork image}"
+        : "${EEZ_DEVNET_EXPLORER_FRONTEND_IMAGE:?Select a compatible frontend image}"
+        files=(-c explorers.yml)
+        case "${EEZ_DEVNET_EXPLORER_ACCESS-overlay}" in
+            overlay) ;;
+            private-host)
+                systemctl is-active --quiet eez-explorer-private-ports.service || {
+                    echo 'Install and start explorer-private-ports.service before publishing backends.' >&2
+                    exit 1
+                }
+                files+=(-c explorers-access.yml)
+                ;;
+            *) echo 'EEZ_DEVNET_EXPLORER_ACCESS must be overlay or private-host.' >&2; exit 1 ;;
+        esac
+        docker stack deploy --detach=true --resolve-image never "${files[@]}" eez-devnet-explorers
+        ;;
+    explorer-stop)
+        wait_seconds=180
+        docker service inspect eez-devnet-explorers_postgres "${explorer_apps[@]}" >/dev/null
+        scale_group 0 "${explorer_apps[@]}"
+        scale_group 0 eez-devnet-explorers_postgres
         ;;
     prepare)
         if docker service inspect "${prep}_prepare" >/dev/null 2>&1; then
@@ -165,7 +220,7 @@ case "${1:-}" in
             eez-devnet-l2_eez-beacon=0 eez-devnet-l2_eez-proof-signer=0
         ;;
     *)
-        echo 'usage: bash scripts/local-devnet.sh up|down|status-all|check-all|prepare|start|status|check|check-pbs|stop|l2-deploy|l2-start|l2-status|l2-stop' >&2
+        echo 'usage: bash scripts/local-devnet.sh up|down|status-all|check-all|prepare|start|status|check|check-pbs|stop|l2-deploy|l2-start|l2-status|l2-stop|explorer-prepare|explorer-start|explorer-stop' >&2
         exit 2
         ;;
 esac

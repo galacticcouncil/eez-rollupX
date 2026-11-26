@@ -1,0 +1,15 @@
+# Optional host backends, protected before publication by explorer-private-ports.sh.
+version: '3.8'
+services:
+  l1-gateway:
+    ports:
+      - target: 8080
+        published: 18112
+        protocol: tcp
+        mode: host
+  l2-gateway:
+    ports:
+      - target: 8080
+        published: 18110
+        protocol: tcp
+        mode: host

@@ -41,6 +41,9 @@ L1 simulations retain stock precompiles.
 
 ## Feature inventory
 
+For an introductory walkthrough, see the
+[block production and settlement lifecycle](hydration/block-production-lifecycle.md).
+
 | ID | Status | Customization | Owning implementation |
 | --- | --- | --- | --- |
 | HYD-01 | Active when configured | Strictly decode `config.hydration`, validate rules version 1 and role identities, validate the counter seed, retain the section in canonical genesis handling, and expose the checked configuration from the L2 chain specification. | `hydration-config`; `eez-l1::chain_config`; `eez-evm::profile` |

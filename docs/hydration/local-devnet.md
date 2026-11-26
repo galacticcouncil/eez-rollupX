@@ -27,6 +27,8 @@ applications; application deployment is a separate step.
 
 See the [local L2 runbook](../../deploy/swarm/devnet/L2.md) for build, deployment,
 interfaces, counter/settlement canary and recovery procedures.
+The [block production lifecycle](block-production-lifecycle.md) explains how
+transactions move from local execution through signing and L1 settlement.
 
 ## Local validation
 

@@ -55,7 +55,7 @@ are in memory and may need resubmission after restart.
 | Disposable Kurtosis protocol network | [Kurtosis guide](testing/kurtosis/README.md) |
 | Public Chiado L2 | [Chiado quick start](docs/runbooks/chiado-quickstart.md) |
 | Join an existing Chiado rollup | [Existing-rollup procedure](docs/runbooks/chiado-existing-rollup.md) |
-| Lark staging (assembly pending) | [Lark inputs](deploy/swarm/lark/README.md) |
+| Lark staging | [Lark bootstrap and operations](deploy/swarm/lark/README.md) |
 | Deployment source layout | [Deployment index](deploy/README.md) |
 
 ## How it works

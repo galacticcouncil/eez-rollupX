@@ -51,4 +51,4 @@ require completed CI qualification and the existing
 Promote the same tested digests between environments, with separate genesis,
 keys and deployment bundles. Plans provide no migration or rollback mechanism.
 Unknown schema versions are rejected. See [Lark inputs](../swarm/lark/README.md)
-for the unimplemented assembly/API deployment work.
+for L1 bootstrap and the remaining PBS/L2/explorer assembly work.

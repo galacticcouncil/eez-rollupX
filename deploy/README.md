@@ -5,7 +5,7 @@
 | [networks/](networks/README.md) | Public local/Lark/Chiado intent manifests and release planning. |
 | [swarm/components/](swarm/components/README.md) | Reusable PBS, rollup and explorer startup code for Swarm. |
 | [swarm/local/](swarm/local/README.md) | The running local testnet: concrete stacks, public fixtures, setup and checks. |
-| [swarm/lark/](swarm/lark/README.md) | Lark assembly requirements and the shared components to reuse. |
+| [swarm/lark/](swarm/lark/README.md) | Lark API bootstrap, L1 lifecycle and remaining PBS/L2 assembly. |
 | [explorers/](explorers/README.md) | Existing standalone Chiado Compose explorer assets; browser bootstrap also used by Swarm. |
 
 Use [scripts/local-devnet.sh](../scripts/local-devnet.sh) from the repository root

@@ -58,7 +58,9 @@ POST retries after an uncertain response. Rerunning a confirmed submission waits
 on the retained job; it does not regenerate or resubmit it. Inspect ambiguous
 submissions before recovery. Initial finality can take 30 minutes; waits are
 bounded by `--timeout` (default 3600 seconds). Timed-out jobs remain visible in
-Swarmpit and do not restart automatically.
+Swarmpit and do not restart automatically. CLI timeouts apply to each phase;
+the readiness job itself has a one-hour deadline. Interrupting the CLI leaves
+submitted Swarm jobs running; rerun it to observe confirmed submissions.
 
 ## Daily operation
 

@@ -158,7 +158,7 @@ class Lifecycle:
     def claim(self, node, tool):
         self.validate_node(node)
         for kind, field in (('services', 'serviceName'), ('stacks', 'stackName'),
-                            ('volumes', 'volumeName'), ('secrets', 'secretName')):
+                            ('volumes', 'volumeName'), ('secrets', 'secretName'), ('networks', 'networkName')):
             require(not any(item.get(field, '') == PREFIX or item.get(field, '').startswith((PREFIX+'-', PREFIX+'_'))
                             for item in self.api.get(kind)),
                     "EEZ Lark resources already exist without this deployment state; refusing adoption")
@@ -327,17 +327,21 @@ class Lifecycle:
                 "Swarmpit EEZ stack differs from saved state; reconcile operator edits before applying")
         require(set(entry['compose']['services']) == {'execution', 'beacon', 'validator'},
                 "unexpected runtime roles; refusing a partial lifecycle operation")
-        current = {item['serviceName']: fingerprint(item) for item in self.services(PREFIX)}
+        live = self.services(PREFIX)
+        current = {item['serviceName']: fingerprint(item) for item in live}
         require(self.data.get('fingerprints') == current,
                 "live EEZ runtime settings changed; reconcile operator edits before applying")
+        require(all(item['replicas'] == entry['compose']['services'][item['serviceName'].split('_', 1)[1]]
+                    ['deploy']['replicas'] for item in live),
+                "live EEZ replica targets changed; reconcile operator edits before applying")
         order = ('execution', 'beacon', 'validator') if replicas else ('validator', 'beacon', 'execution')
         for role in order:
-            if entry['compose']['services'][role]['deploy']['replicas'] == replicas:
-                continue
-            # Save the exact desired source before POST; it is also saved by Swarmpit.
-            entry['compose']['services'][role]['deploy']['replicas'] = replicas
-            self.state.save()
-            self.api.post('stacks/' + PREFIX, {'name': PREFIX, 'spec': {'compose': json.dumps(entry['compose'])}})
+            if entry['compose']['services'][role]['deploy']['replicas'] != replicas:
+                # Save the exact desired source before POST; it is also saved by Swarmpit.
+                entry['compose']['services'][role]['deploy']['replicas'] = replicas
+                self.state.save()
+                self.api.post('stacks/' + PREFIX, {'name': PREFIX, 'spec': {'compose': json.dumps(entry['compose'])}})
+            # A resumed phase may already have its desired count but still be stopping.
             expected = {name: spec['deploy']['replicas'] for name, spec in entry['compose']['services'].items()}
             self.wait_runtime(expected)
         self.data['phase'] = 'started' if replicas else 'stopped'

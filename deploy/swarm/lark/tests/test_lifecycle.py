@@ -28,7 +28,7 @@ class FakeApi:
         self.stackfiles = {}
         self.items = {'services': [{'id': 'z'*25, 'stack': 'unrelated', 'serviceName': 'unrelated_web'}],
                       'nodes': [dict(id=NODE, role='manager', state='ready', availability='active', arch='x86_64')],
-                      'volumes': [], 'secrets': [], 'stacks': [{'stackName': 'unrelated'}]}
+                      'volumes': [], 'secrets': [], 'networks': [], 'stacks': [{'stackName': 'unrelated'}]}
         self.failed_job = False
 
     def get(self, path):
@@ -122,6 +122,15 @@ class LifecycleTest(unittest.TestCase):
                 life.Lifecycle(api, state, runtime).bootstrap(NODE, Path('/missing'))
             self.assertEqual(api.writes, [])
 
+    def test_existing_namespace_network_blocks_creation_before_credentials(self):
+        with tempfile.TemporaryDirectory() as directory, life.State(Path(directory), 'target') as state:
+            api = FakeApi()
+            api.items['networks'].append({'networkName':life.PREFIX+'_l1'})
+            with self.assertRaisesRegex(life.DeploymentError, 'refusing adoption'):
+                life.Lifecycle(api, state, runtime).bootstrap(NODE, Path('/missing'))
+            self.assertEqual(api.writes, [])
+            self.assertFalse((Path(directory)/'validator-mnemonic').exists())
+
     def test_inconclusive_mutation_is_persisted_and_never_retried_blindly(self):
         with tempfile.TemporaryDirectory() as directory, life.State(Path(directory), 'target') as state:
             api = FakeApi()
@@ -161,6 +170,33 @@ class LifecycleTest(unittest.TestCase):
             with self.assertRaisesRegex(life.DeploymentError, 'one-shot job failed'):
                 life.Lifecycle(api, state, runtime).bootstrap(NODE, Path('/missing'))
             self.assertEqual(len(api.writes), writes)
+
+    def test_resumed_stop_waits_for_validator_exit_before_stopping_beacon(self):
+        with tempfile.TemporaryDirectory() as directory, life.State(Path(directory), 'target') as state:
+            api = FakeApi()
+            self.bootstrap(state, api)
+            state.data['stacks'][life.PREFIX]['compose']['services']['validator']['deploy']['replicas'] = 0
+            api.stackfiles[life.PREFIX]['services']['validator']['deploy']['replicas'] = 0
+            validator = next(s for s in api.items['services'] if s['serviceName'] == life.PREFIX+'_validator')
+            validator['replicas'] = 0
+            before = len(api.writes)
+            def exit_validator(_):
+                self.assertEqual(len(api.writes), before)
+                validator['status']['tasks']['running'] = 0
+            with patch.object(life.time, 'sleep', side_effect=exit_validator) as pause:
+                self.assertEqual(life.Lifecycle(api, state, runtime, 30).scale(0)['phase'], 'stopped')
+                pause.assert_called_once()
+
+    def test_out_of_band_replica_changes_are_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as directory, life.State(Path(directory), 'target') as state:
+            api = FakeApi()
+            self.bootstrap(state, api)
+            service = next(s for s in api.items['services'] if s.get('stack') == life.PREFIX)
+            service['replicas'] = 0
+            before = len(api.writes)
+            with self.assertRaisesRegex(life.DeploymentError, 'replica targets changed'):
+                life.Lifecycle(api, state, runtime, 30).scale(0)
+            self.assertEqual(len(api.writes), before)
 
     def test_jobs_share_only_their_required_data_and_secrets(self):
         preparation = life.job_spec(NODE, 'example', True)

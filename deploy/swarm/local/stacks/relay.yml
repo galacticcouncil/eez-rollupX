@@ -14,6 +14,9 @@ x-relay-deploy: &relay-deploy
     order: stop-first
   restart_policy:
     condition: on-failure
+  resources:
+    limits: {cpus: '1.0', memory: 512M}
+    reservations: {cpus: '0.05', memory: 32M}
 x-relay: &relay
   logging: *logging
   image: ethpandaops/mev-boost-relay@sha256:3600f04fcaf0bbb231f4737470f094fdf2314db54b4853197fa369aea90f8b19
@@ -82,6 +85,9 @@ services:
     deploy:
       <<: *relay-deploy
       replicas: 1
+      resources:
+        limits: {cpus: '2.0', memory: 1G}
+        reservations: {cpus: '0.10', memory: 64M}
 configs:
   relay_start_v4:
     file: ../../components/pbs/relay-start.sh

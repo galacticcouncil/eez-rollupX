@@ -14,6 +14,9 @@ x-runtime: &runtime
     order: stop-first
   restart_policy:
     condition: on-failure
+  resources:
+    limits: {cpus: '2.0', memory: 2G}
+    reservations: {cpus: '0.10', memory: 256M}
 services:
   execution:
     logging: *logging
@@ -36,7 +39,11 @@ services:
         target: engine-jwt
     networks: [l1]
     stop_grace_period: 2m
-    deploy: *runtime
+    deploy:
+      <<: *runtime
+      resources:
+        limits: {cpus: '4.0', memory: 2G}
+        reservations: {cpus: '0.10', memory: 256M}
   beacon:
     logging: *logging
     image: sigp/lighthouse@sha256:9e71f6db59d358acb43719fcc5240952811821cc2fc4c3cfa90e57f2e4b38288
@@ -80,7 +87,11 @@ services:
       - validators:/validators
     networks: [l1]
     stop_grace_period: 2m
-    deploy: *runtime
+    deploy:
+      <<: *runtime
+      resources:
+        limits: {cpus: '1.0', memory: 512M}
+        reservations: {cpus: '0.05', memory: 64M}
 networks:
   l1:
     driver: overlay

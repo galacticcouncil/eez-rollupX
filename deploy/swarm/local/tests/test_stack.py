@@ -10,6 +10,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DevnetStackTest(unittest.TestCase):
+    def test_all_runtime_roles_have_valid_limits_and_reservations(self):
+        count = 0
+        for name in ('l1', 'l2', 'relay', 'builder', 'boost', 'explorers'):
+            stack = yaml.safe_load((ROOT / 'stacks' / f'{name}.yml').read_text())
+            for role, service in stack['services'].items():
+                resource = service['deploy']['resources']
+                limits, reserved = resource['limits'], resource['reservations']
+                self.assertGreater(float(limits['cpus']), 0, role)
+                self.assertGreater(float(reserved['cpus']), 0, role)
+                self.assertLessEqual(float(reserved['cpus']), float(limits['cpus']), role)
+                def memory(value):
+                    return float(value[:-1]) * {'M': 2**20, 'G': 2**30}[value[-1]]
+                self.assertGreater(memory(reserved['memory']), 0, role)
+                self.assertLessEqual(memory(reserved['memory']), memory(limits['memory']), role)
+                count += 1
+        self.assertEqual(count, 21)
+
     def setUp(self):
         self.stack = yaml.safe_load((ROOT / "stacks/l1.yml").read_text())
         self.prepare = yaml.safe_load((ROOT / "stacks/prepare.yml").read_text())

@@ -191,6 +191,7 @@ case "${1:-}" in
         fi
         docker service create --detach=true --name "$probe" --restart-condition none \
             --constraint node.labels.platform.data==true \
+            --limit-cpu 1.0 --limit-memory 256M \
             --log-driver json-file --log-opt max-size=20m --log-opt max-file=3 \
             --network "$check_network" "${configs[@]}" "${mounts[@]}" \
             --entrypoint bash "$image" -c \

@@ -129,6 +129,11 @@ These `start` / `stop` commands control **L1 only**. Likewise `l2-start` /
 
 ## Logs, storage and recovery
 
+Runtime stacks declare CPU/memory ceilings and scheduling reservations. Ceilings
+are not preallocated memory; Composer temporarily has a 16 GiB ceiling while its
+growth is investigated. Budget changes require service restarts and preserve
+chain state; keep the installed fee overlay when applying L2 definitions.
+
 Inspect services in Swarmpit or, for example:
 
 ```sh

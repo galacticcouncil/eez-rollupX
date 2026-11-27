@@ -14,6 +14,9 @@ x-runtime: &runtime
     order: stop-first
   restart_policy:
     condition: on-failure
+  resources:
+    limits: {cpus: '2.0', memory: 2G}
+    reservations: {cpus: '0.10', memory: 256M}
 x-public-configs: &public-configs
   - source: start_v3
     target: /l2-start.sh
@@ -76,7 +79,12 @@ services:
         target: engine-jwt
     networks: [l1]
     stop_grace_period: 2m
-    deploy: *runtime
+    deploy:
+      <<: *runtime
+      resources:
+        # Temporary headroom while Composer heap growth is investigated.
+        limits: {cpus: '8.0', memory: 16G}
+        reservations: {cpus: '0.50', memory: 1G}
   eez-proof-signer:
     logging: *logging
     image: ${EEZ_DEVNET_SIGNER_IMAGE:?Select the locally built signer image}
@@ -87,7 +95,11 @@ services:
     volumes: [deployment:/out:ro]
     networks: [l1]
     stop_grace_period: 2m
-    deploy: *runtime
+    deploy:
+      <<: *runtime
+      resources:
+        limits: {cpus: '8.0', memory: 4G}
+        reservations: {cpus: '0.25', memory: 256M}
   eez-beacon:
     logging: *logging
     image: sigp/lighthouse@sha256:9e71f6db59d358acb43719fcc5240952811821cc2fc4c3cfa90e57f2e4b38288

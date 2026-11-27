@@ -21,6 +21,9 @@ services:
         order: stop-first
       rollback_config:
         order: stop-first
+      resources:
+        limits: {cpus: '0.50', memory: 128M}
+        reservations: {cpus: '0.02', memory: 16M}
 configs:
   boost_start_v1:
     file: ../../components/pbs/boost-start.sh

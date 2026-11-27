@@ -158,4 +158,58 @@ the full Rust/Kurtosis/protocol matrices were not run.
 
 The devnet remains running with the fee overlay. Dedicated builder-refund
 accounting/negative controls, independent follower replay, the other 61 protocol
-scenarios, explorer-inclusive stop/start and backup/restore remain unqualified.
+scenarios and backup/restore remain unqualified. Explorer-inclusive stop/start
+was exercised subsequently, as recorded below.
+
+## Controlled restart — 2026-11-27
+
+Configuration revision `6cca9954`, runtime `5f8813d4` and the unchanged Core pin
+were used for a complete `local-devnet.sh down` / `up`. All 21 runtime services
+reached zero running tasks, then resumed using their saved specifications.
+Fingerprints of every service specification, excluding only replica count,
+matched before and after: images, volumes, configuration/secret references and
+the active fee overlay were preserved. No images were built and no deployment,
+genesis, bootstrap or funding job was rerun by the lifecycle helper.
+
+Read-only before/after snapshots retained identical deployment checksums,
+counter value 3, canonical L1 block 14352 and L2 block 8688 hashes/state roots,
+the nested source/settlement/delivery receipts, settlement correlation and both
+explorers' indexed transaction records. L1 advanced 19821→19829 and L2 advanced
+41506→41596; their explorer heads also advanced. Both private HTTPS homepages
+returned 200. `eez-devnet-check-261127110314` completed with exit 0, checking
+L1/consensus, canonical PBS delivery, L2 advancement and retained safe state.
+
+Fresh canary `eez-devnet-restart-canary-2611271059` completed with exit 0:
+counter 3→4 in L2 block 41621, transaction
+`0x8ff76b34872602c097f7e343b9b10cd8dfad9428ea7b865f136a335a08e0356f`.
+Canonical settlement advanced through L2 block 41628, commitment
+`0x85911d9d01a9f2980ff3746348d09621b4bd2dc80a9aec13191436992a61a06a`,
+via L1 transaction
+`0xdcf8944ad20b254b6f352f01997376f479bbb20005027b08a74384fa220a46f7`.
+The L2 explorer indexed the fresh receipt and the correlation RPC marked it
+canonical. This demonstrates new execution/settlement after the restart.
+
+Fresh cross-chain job `eez-devnet-restart-cross-chain-2611271059` also completed
+with exit 0. Its one selected `nestedCounter` scenario passed the complete runner
+and independent receipt/causal/KZG/native-semantic checks (76.04 seconds for
+execution and 2.517 seconds for independent collection). It reused the existing
+image and compiler cache. Source transaction
+`0xe5f0de7f6e80c1566645a5bb7fd97a2b71797d9e410a586471be2af462d847b0`
+was settled by
+`0x06a07025136d3bbf10117a32bffb5365828d4d35217dc53037d3f0d0751df689`,
+with L2 delivery
+`0x3a0512b3b1dc5184170de8ff0e0a1a2748989994f3e0648704f965d8fdc36022`.
+This checks new cross-chain admission after recovery; the full 64-case inventory
+was not repeated.
+
+Evidence is retained in `eez-devnet-restart-2611271059` and ignored
+`artifacts/devnet-restart/2611271059/`, including before/after snapshots,
+`comparison.json`, specification fingerprints and lifecycle logs. The nested-job summary
+and raw evidence are in the separate `eez-devnet-restart-cross-chain-2611271059`
+volume and the artifact directory's `cross-chain/protocol-e2e/` subdirectory.
+Documentation whitespace, edited links and shell-example syntax were checked;
+no runtime implementation changed or source builds were needed. This is a
+controlled graceful restart with retained local storage. It does not establish
+crash durability, durable recovery of accepted queues, host-loss recovery or a
+backup/restore. New settlement was checked for canonical inclusion, without
+waiting for that posting block to finalize.

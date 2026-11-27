@@ -23,10 +23,12 @@ sudo bash scripts/local-devnet.sh status-all
 sudo bash scripts/local-devnet.sh check-all
 ```
 
-`down` stops all 13 runtime services in dependency order, waiting for actual
-tasks to stop: Composer first, validator next, remaining consumers, canonical
-beacon, then execution/PostgreSQL/Redis. `up` resumes those same services in
-reverse dependency groups. It needs no image overrides and never reruns genesis,
+`down` stops the 13 base runtime services and, when installed, all eight explorer
+services (21 total). It waits for actual tasks to stop: explorer consumers first,
+then Composer, validator, remaining consumers, canonical beacon and
+execution/PostgreSQL/Redis; explorer PostgreSQL stops last. `up` resumes those
+same services in dependency groups, starting explorer consumers after L2.
+It needs no image overrides and never reruns genesis,
 bootstrap, funding or contract deployment. Existing images, volumes, secrets,
 validator signing history and deployment records remain paired.
 
@@ -36,7 +38,8 @@ stops the command and reports the service; inspect its tasks/logs before retryin
 Run one lifecycle operation at a time. `up` waits for running tasks, while
 `check-all` submits a separate finite readiness job; require its successful exit.
 That job checks L1 advancement/finality, PBS, L2 advancement, saved configuration,
-the counter read and a non-genesis safe head. It does not broadcast a transaction.
+the counter read and a non-genesis safe head. It does not check explorer HTTP
+readiness or broadcast a transaction; check both explorer URLs separately.
 
 The original `start`/`stop` commands below control **L1 only**, and `l2-start` /
 `l2-stop` control L2 only. Use `up` / `down` for daily whole-network operation.
@@ -48,6 +51,12 @@ On 2026-11-26, complete `down` / `up` passed on the same volumes. Checks preserv
 settled L2 block 1368, counter value 2, the prior receipt and settlement correlation;
 a fresh counter increment 2 → 3 settled through L2 block 2208. This was a controlled
 stop/start, not a crash, overnight-outage or backup/restore exercise.
+
+On 2026-11-27, the same procedure passed with all 21 services, including the
+eight optional explorers and the active fee overlay. Saved service definitions,
+settled receipts/correlation and explorer records were preserved; both indexes
+resumed advancing. A fresh counter increment 3→4 settled through L2 block 41628.
+See the [qualification record](VALIDATION.md) for revisions and evidence.
 
 ## Storage limits
 

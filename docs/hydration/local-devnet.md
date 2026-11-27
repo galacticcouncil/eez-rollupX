@@ -44,6 +44,14 @@ protocol-ordering coverage, independent follower replay, restart recovery,
 Chiado deployment or ZisK proving. Failed preflight/startup attempts and their
 corrections are retained in the task record and Swarm history.
 
+On 2026-11-27, a controlled stop/start at configuration revision `6cca9954`
+reused those runtime images and genesis while stopping all 21 devnet services,
+including the optional explorers. Counter value 3 and historical settlement
+records survived; a new increment 3→4 settled canonically through L2 block 41628.
+Both explorer indexes resumed. The [shared qualification record](../../deploy/swarm/devnet/VALIDATION.md)
+contains evidence and limits. This qualifies that graceful restart with retained
+volumes, not crash durability, durable queue recovery or an isolated restore.
+
 This local fixture is the explicit exception to production role-key guidance:
 public test keys may be used only on the isolated development network. Lark and
 Chiado require separately provisioned accounts. Role changes require a fresh

@@ -43,14 +43,14 @@ Path(os.environ['RESULT']).write_text(json.dumps({
             script = script.replace('/out/', str(out) + '/').replace('/pbs/', str(pbs) + '/')
             arguments = [role]
             if role_file is not None:
-                if role_file == 'valid':
+                if role_file in ('valid','relative'):
                     file = root / 'role.env'
                     file.write_text(f'TEST_SETTING=role-file\nROLE_MARKER={role}\n')
-                    arguments.append(str(file))
+                    arguments.append(file.name if role_file == 'relative' else str(file))
                 else:
                     arguments.append(role_file)
             result = subprocess.run(['sh', '-c', script, 'start.sh', *arguments, *extra],
-                capture_output=True, text=True, env={**os.environ, 'TEST_SETTING':'process',
+                capture_output=True, text=True, cwd=root, env={**os.environ, 'TEST_SETTING':'process',
                 'RESULT':str(result_path), 'PATH':f'{root}:' + os.environ['PATH']})
             return result, json.loads(result_path.read_text()) if result_path.exists() else None
 
@@ -65,6 +65,9 @@ Path(os.environ['RESULT']).write_text(json.dumps({
         result, executed = self.run_rollup('node')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(executed['setting'], 'deployment')
+        result, executed = self.run_rollup('node','relative')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(executed['setting'], 'role-file')
 
     def test_bad_role_or_role_file_cannot_launch_runtime(self):
         for role, file, extra in [('other',None,()), ('node','',()),

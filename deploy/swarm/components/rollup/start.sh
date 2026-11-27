@@ -4,6 +4,7 @@ case "${1-}" in node|signer) ;; *) echo 'Expected node or signer.' >&2; exit 2 ;
 test "$#" -le 2 || { echo 'Expected role and optional role environment file.' >&2; exit 2; }
 if [ "$#" -eq 2 ]; then
     test -n "$2" && test -r "$2" || { echo 'Role environment file is not readable.' >&2; exit 2; }
+    case "$2" in */*) role_env=$2 ;; *) role_env=./$2 ;; esac
 fi
 test -f /out/deployment-complete
 (cd / && sha256sum -c /out/deployment.sha256)
@@ -11,7 +12,7 @@ set -a
 . /out/deployments.env
 # Local stacks pass their public fixtures; Lark can mount a role-specific secret.
 # Keep process environment -> deployment bindings -> role file precedence.
-if [ "$#" -eq 2 ]; then . "$2"; fi
+if [ "$#" -eq 2 ]; then . "$role_env"; fi
 set +a
 case "$1" in
     signer)

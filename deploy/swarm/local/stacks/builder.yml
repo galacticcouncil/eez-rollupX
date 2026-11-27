@@ -47,9 +47,9 @@ services:
     deploy: *deploy
 configs:
   builder_start_v4:
-    file: ./builder-start.sh
+    file: ../../components/pbs/builder-start.sh
   builder_beacon_start_v3:
-    file: ./builder-beacon-start.sh
+    file: ../scripts/builder-beacon-start.sh
 volumes:
   genesis:
     external: true

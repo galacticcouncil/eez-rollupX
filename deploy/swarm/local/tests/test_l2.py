@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class L2Test(unittest.TestCase):
     def test_runtime_storage_is_separate_and_public_inputs_are_read_only(self):
-        stack = yaml.safe_load((ROOT / "l2.yml").read_text())
+        stack = yaml.safe_load((ROOT / "stacks/l2.yml").read_text())
         for name, service in stack["services"].items():
             self.assertNotIn("ports", service)
             self.assertEqual(service["deploy"]["replicas"], 1)
@@ -45,9 +45,9 @@ class L2Test(unittest.TestCase):
             (root / "cast").chmod(0o755)
             # Only the public L1 document is copied; the signer never mounts validator data.
             (root / "l1.json").write_text('{"config":{"chainId":414141}}')
-            script = (ROOT / "l2-deploy.sh").read_text().replace('/repo', str(repo)).replace('/out', str(out))
+            script = (ROOT / "scripts/l2-deploy.sh").read_text().replace('/repo', str(repo)).replace('/out', str(out))
             script = script.replace('/genesis/metadata/genesis.json', str(root / 'l1.json'))
-            script = script.replace('/l2-fixtures.env', str(ROOT / "l2-fixtures.env"))
+            script = script.replace('/l2-fixtures.env', str(ROOT / "fixtures/l2-fixtures.env"))
             result = subprocess.run(["bash", "-c", script], text=True, capture_output=True,
                                     env={**os.environ, "PATH": f"{root}:{os.environ['PATH']}"})
             base = out / "genesis.base.json"

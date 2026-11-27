@@ -9,7 +9,7 @@ accounts for an isolated development network:
 | Oracle updater | Account 2: `0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc` |
 | PEPL keeper | Account 3: `0x90f79bf6eb2c4f870365e785982e1f101e93b906` |
 
-`deploy/swarm/devnet/l2-deploy.sh` generates a copy of `genesis.dev.json` with
+`deploy/swarm/local/scripts/l2-deploy.sh` generates a copy of `genesis.dev.json` with
 these roles in `config.hydration` and the counter account `0x...0800` seeded
 with nonce 1, no balance, code or storage. Both role accounts already have test
 ETH in the development base. The production and development base fixtures remain
@@ -25,7 +25,7 @@ L2 mempool. Cross-chain fronts reject protocol transactions intended for the
 Live-block prefix. These roles are identities, not deployed oracle or PEPL
 applications; application deployment is a separate step.
 
-See the [local L2 runbook](../../deploy/swarm/devnet/L2.md) for build, deployment,
+See the [local L2 runbook](../../deploy/swarm/local/docs/L2.md) for build, deployment,
 interfaces, counter/settlement canary and recovery procedures.
 The [block production lifecycle](block-production-lifecycle.md) explains how
 transactions move from local execution through signing and L1 settlement.
@@ -48,7 +48,7 @@ On 2026-11-27, a controlled stop/start at configuration revision `6cca9954`
 reused those runtime images and genesis while stopping all 21 devnet services,
 including the optional explorers. Counter value 3 and historical settlement
 records survived; a new increment 3→4 settled canonically through L2 block 41628.
-Both explorer indexes resumed. The [shared qualification record](../../deploy/swarm/devnet/VALIDATION.md)
+Both explorer indexes resumed. The [shared qualification record](../../deploy/swarm/local/docs/VALIDATION.md)
 contains evidence and limits. This qualifies that graceful restart with retained
 volumes, not crash durability, durable queue recovery or an isolated restore.
 

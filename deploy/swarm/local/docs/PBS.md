@@ -16,7 +16,7 @@ or put DSNs in command args.
 
 From this directory, after the L1 is finalized. On another developer's machine,
 use Docker Swarm and label the intended data node `platform.data=true` as in the
-[L1 prerequisites](README.md#prepare-once). The label selects local storage;
+[L1 prerequisites](../README.md#prepare-once). The label selects local storage;
 it does not require a separately deployed platform stack. Generate each secret
 once; ordinary restart reuses existing secrets and volumes:
 
@@ -124,7 +124,7 @@ Inspect service logs/tasks through Swarmpit or `sudo docker service logs/ps` for
 `eez-devnet-pbs_redis`, `eez-devnet-pbs_postgres`, and `eez-devnet-boost_mev-boost`.
 
 For daily whole-network operation use `local-devnet.sh down` / `up` and
-`check-all` from the repository root. The [complete lifecycle](README.md#daily-use-the-complete-installed-devnet)
+`check-all` from the repository root. The [complete lifecycle](../README.md#daily-use-the-complete-installed-devnet)
 includes all PBS services and was exercised with preserved state and fresh
 settlement. Runtime tasks now rotate Docker logs at 20 MB × 3 files; builder
 logging defaults to info. Keep the same service specifications and volumes.

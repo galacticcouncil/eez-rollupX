@@ -43,7 +43,7 @@ if [[ "$1 $2" == 'service ps' ]]; then printf '%s\\n' "$PREP_STATE"; exit 0; fi
     def test_completed_preparation_selects_intended_stack(self):
         result, commands = self.run_command("start", "Complete 2 minutes ago")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("stack deploy --detach=true -c stack.yml eez-devnet", commands)
+        self.assertIn("stack deploy --detach=true -c stacks/l1.yml eez-devnet", commands)
 
     def test_stop_targets_only_devnet_writers_and_keeps_storage(self):
         result, commands = self.run_command("stop")
@@ -64,7 +64,7 @@ if [[ "$1 $2" == 'service ps' ]]; then printf '%s\\n' "$PREP_STATE"; exit 0; fi
                 EEZ_DEVNET_NODE_IMAGE="fixture:node", EEZ_DEVNET_SIGNER_IMAGE="fixture:signer")
             if state.startswith("Complete"):
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("stack deploy --detach=true --resolve-image never -c l2.yml eez-devnet-l2", commands)
+                self.assertIn("stack deploy --detach=true --resolve-image never -c stacks/l2.yml eez-devnet-l2", commands)
             else:
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn("stack deploy", commands)

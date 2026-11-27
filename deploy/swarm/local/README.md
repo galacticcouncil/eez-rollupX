@@ -3,7 +3,7 @@
 First stage of the server devnet/Lark deployment path: private Ethereum PoS L1,
 L1 chain ID 414141, L2 chain ID 424242, 12-second slots, 64 validators, Fulu and BPO1 from genesis
 (15 maximum / 10 target blobs). Mainnet preset epochs remain 32 slots.
-The [builder/PBS stack](PBS.md) extends this L1. The [EEZ L2 runbook](L2.md)
+The [builder/PBS stack](docs/PBS.md) extends this L1. The [EEZ L2 runbook](docs/L2.md)
 adds the local Hydration network. L1 health alone does not establish EEZ
 cross-chain settlement. The production chain/profile and Core pin are unchanged.
 
@@ -56,7 +56,7 @@ On 2026-11-27, the same procedure passed with all 21 services, including the
 eight optional explorers and the active fee overlay. Saved service definitions,
 settled receipts/correlation and explorer records were preserved; both indexes
 resumed advancing. A fresh counter increment 3→4 settled through L2 block 41628.
-See the [qualification record](VALIDATION.md) for revisions and evidence.
+See the [qualification record](docs/VALIDATION.md) for revisions and evidence.
 
 ## Storage limits
 

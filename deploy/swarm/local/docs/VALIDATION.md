@@ -32,7 +32,7 @@ sudo docker buildx build --builder default --platform linux/amd64 \
   --build-arg DEPLOY_IMAGE=eez-devnet-deploy:5f8813d4 \
   --label org.opencontainers.image.revision="$revision" \
   --label io.eez.protocol.revision="$protocol" \
-  --load -f deploy/swarm/devnet/Dockerfile.validation \
+  --load -f deploy/swarm/local/checks/Dockerfile.validation \
   -t "eez-devnet-validation:$tag" .
 ```
 
@@ -51,7 +51,7 @@ Kurtosis fee assumptions with the same runtime images before this exercise:
 sudo env EEZ_DEVNET_NODE_IMAGE=eez-devnet-node:5f8813d4 \
   EEZ_DEVNET_SIGNER_IMAGE=eez-devnet-signer:5f8813d4 \
   docker stack deploy --detach=true --resolve-image never \
-  -c deploy/swarm/devnet/l2.yml -c deploy/swarm/devnet/l2-fees.yml eez-devnet-l2
+  -c deploy/swarm/local/stacks/l2.yml -c deploy/swarm/local/stacks/l2-fees.yml eez-devnet-l2
 ```
 
 Require the Composer update to complete and its canonical catch-up to finish.
@@ -88,7 +88,7 @@ sudo docker volume create "$evidence"
 sudo env "EEZ_DEVNET_VALIDATION_IMAGE=eez-devnet-validation:$tag" \
   "EEZ_DEVNET_VALIDATION_VOLUME=$evidence" "EEZ_DEVNET_CHECKOUT=$PWD" \
   docker stack deploy --detach=true --resolve-image never \
-  -c deploy/swarm/devnet/cross-chain.yml "eez-devnet-validation-$stamp"
+  -c deploy/swarm/local/checks/cross-chain.yml "eez-devnet-validation-$stamp"
 sudo docker service ps "eez-devnet-validation-${stamp}_check" --no-trunc
 sudo docker service logs -f "eez-devnet-validation-${stamp}_check"
 ```

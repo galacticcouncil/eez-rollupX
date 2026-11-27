@@ -15,7 +15,7 @@ x-runtime: &runtime
   restart_policy:
     condition: on-failure
 x-public-configs: &public-configs
-  - source: start_v2
+  - source: start_v3
     target: /l2-start.sh
   - source: fixtures_v1
     target: /l2-fixtures.env
@@ -23,7 +23,7 @@ services:
   eez-node:
     logging: *logging
     image: ${EEZ_DEVNET_NODE_IMAGE:?Select the locally built node image}
-    entrypoint: [sh, /l2-start.sh, node]
+    entrypoint: [sh, /l2-start.sh, node, /l2-fixtures.env]
     configs: *public-configs
     environment:
       EEZ_L1_CHAIN: devnet
@@ -80,7 +80,7 @@ services:
   eez-proof-signer:
     logging: *logging
     image: ${EEZ_DEVNET_SIGNER_IMAGE:?Select the locally built signer image}
-    entrypoint: [sh, /l2-start.sh, signer]
+    entrypoint: [sh, /l2-start.sh, signer, /l2-fixtures.env]
     configs: *public-configs
     environment:
       RUST_LOG: info
@@ -103,12 +103,12 @@ services:
     stop_grace_period: 2m
     deploy: *runtime
 configs:
-  start_v2:
-    file: ./l2-start.sh
+  start_v3:
+    file: ../../components/rollup/start.sh
   fixtures_v1:
-    file: ./l2-fixtures.env
+    file: ../fixtures/l2-fixtures.env
   beacon_start_v1:
-    file: ./l2-beacon-start.sh
+    file: ../scripts/l2-beacon-start.sh
 volumes:
   genesis:
     external: true

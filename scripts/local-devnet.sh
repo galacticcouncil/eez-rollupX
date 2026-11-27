@@ -2,7 +2,7 @@
 # Server-local Swarm lifecycle; run with Docker administration permissions.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$repo/deploy/swarm/devnet"
+cd "$repo/deploy/swarm/local"
 image=ethpandaops/ethereum-genesis-generator@sha256:017f8bdbd454d2fcf4e0f65f6c64b5bc4c991f5846220e9be188145fa85875db
 stack=eez-devnet
 prep=eez-devnet-414141-prep
@@ -112,7 +112,7 @@ case "${1:-}" in
     explorer-start)
         : "${EEZ_DEVNET_BLOCKSCOUT_IMAGE:?Select the built backend fork image}"
         : "${EEZ_DEVNET_EXPLORER_FRONTEND_IMAGE:?Select a compatible frontend image}"
-        files=(-c explorers.yml)
+        files=(-c stacks/explorers.yml)
         case "${EEZ_DEVNET_EXPLORER_ACCESS-overlay}" in
             overlay) ;;
             private-host)
@@ -120,7 +120,7 @@ case "${1:-}" in
                     echo 'Install and start explorer-private-ports.service before publishing backends.' >&2
                     exit 1
                 }
-                files+=(-c explorers-access.yml)
+                files+=(-c stacks/explorers-access.yml)
                 ;;
             *) echo 'EEZ_DEVNET_EXPLORER_ACCESS must be overlay or private-host.' >&2; exit 1 ;;
         esac
@@ -143,14 +143,14 @@ case "${1:-}" in
         if ! docker secret inspect eez-devnet-engine-jwt >/dev/null 2>&1; then
             openssl rand -hex 32 | docker secret create eez-devnet-engine-jwt -
         fi
-        docker stack deploy --detach=true -c prepare.yml "$prep"
+        docker stack deploy --detach=true -c stacks/prepare.yml "$prep"
         echo "Inspect preparation: docker service ps ${prep}_prepare --no-trunc"
         ;;
     start)
         # A completed preparation is required; starting clients never generates genesis.
         state="$(docker service ps --no-trunc --format '{{.CurrentState}}' "${prep}_prepare")"
         [[ "$state" == Complete* ]] || { echo 'Require successful preparation before starting.' >&2; exit 1; }
-        docker stack deploy --detach=true -c stack.yml "$stack"
+        docker stack deploy --detach=true -c stacks/l1.yml "$stack"
         ;;
     status)
         docker service ls --filter "name=$stack"
@@ -163,10 +163,10 @@ case "${1:-}" in
         stamp="$(date -u +%y%m%d%H%M%S)"
         config="eez-devnet-check-$stamp"
         probe="eez-devnet-check-$stamp"
-        check_script=check.sh
+        check_script=checks/check.sh
         attempts=80
         if [[ "$1" == check-pbs ]]; then
-            check_script=check-pbs.sh
+            check_script=checks/check-pbs.sh
             attempts=60
         fi
         mounts=()
@@ -174,8 +174,8 @@ case "${1:-}" in
         command="bash /check.sh"
         docker config create "$config" "$check_script"
         if [[ "$1" == check-all ]]; then
-            docker config create "$config-pbs" check-pbs.sh
-            docker config create "$config-l2" check-l2.sh
+            docker config create "$config-pbs" checks/check-pbs.sh
+            docker config create "$config-l2" checks/check-l2.sh
             configs+=(--config "source=$config-pbs,target=/check-pbs.sh" --config "source=$config-l2,target=/check-l2.sh")
             mounts+=(--mount type=volume,source=eez-devnet-424242-deployment,target=/out,readonly)
             command+=' && bash /check-pbs.sh && bash /check-l2.sh'
@@ -201,14 +201,14 @@ case "${1:-}" in
         for role in deployment broadcast node beacon; do
             docker volume create "eez-devnet-424242-$role"
         done
-        docker stack deploy --detach=true --resolve-image never -c l2-deploy.yml eez-devnet-l2-deploy
+        docker stack deploy --detach=true --resolve-image never -c stacks/l2-deploy.yml eez-devnet-l2-deploy
         ;;
     l2-start)
         : "${EEZ_DEVNET_NODE_IMAGE:?Select the built node image}"
         : "${EEZ_DEVNET_SIGNER_IMAGE:?Select the built signer image}"
         state="$(docker service ps --no-trunc --format '{{.CurrentState}}' eez-devnet-l2-deploy_deploy)"
         [[ "$state" == Complete* ]] || { echo 'Require successful L2 deployment before starting.' >&2; exit 1; }
-        docker stack deploy --detach=true --resolve-image never -c l2.yml eez-devnet-l2
+        docker stack deploy --detach=true --resolve-image never -c stacks/l2.yml eez-devnet-l2
         ;;
     l2-status)
         for role in eez-node eez-proof-signer eez-beacon; do

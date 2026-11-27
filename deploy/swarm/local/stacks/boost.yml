@@ -23,7 +23,7 @@ services:
         order: stop-first
 configs:
   boost_start_v1:
-    file: ./boost-start.sh
+    file: ../../components/pbs/boost-start.sh
 volumes:
   genesis:
     external: true

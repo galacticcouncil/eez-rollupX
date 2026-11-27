@@ -1,8 +1,13 @@
 #!/bin/sh
 set -eu
+database=${EEZ_RELAY_DATABASE:?Select the relay database and login role}
+case "$database" in
+    [!a-z_]*|*[!a-z0-9_]*) echo 'Invalid relay database identifier.' >&2; exit 2 ;;
+esac
+test "${#database}" -le 63 || { echo 'Relay database identifier is too long.' >&2; exit 2; }
 # Read credentials only inside the task, never from service args or public config.
 password=$(cat /run/secrets/relay-password)
-export POSTGRES_DSN="postgresql://eez_devnet_relay:${password}@postgres:5432/eez_devnet_relay?sslmode=disable"
+export POSTGRES_DSN="postgresql://${database}:${password}@postgres:5432/${database}?sslmode=disable"
 unset password
 export GENESIS_VALIDATORS_ROOT=$(cat /genesis/metadata/genesis_validators_root.txt)
 for fork in GENESIS ALTAIR BELLATRIX CAPELLA DENEB ELECTRA FULU; do

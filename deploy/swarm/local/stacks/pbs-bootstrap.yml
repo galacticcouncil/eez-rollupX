@@ -25,9 +25,9 @@ services:
         constraints: [node.labels.platform.data == true]
 configs:
   bootstrap_v2:
-    file: ./bootstrap-pbs.sh
+    file: ../scripts/bootstrap-pbs.sh
   builder_template_v3:
-    file: ./builder.template.toml
+    file: ../fixtures/builder.template.toml
 volumes:
   pbs:
     external: true

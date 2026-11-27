@@ -182,13 +182,13 @@ services:
       NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
 configs:
   backend_start_v1:
-    file: ./explorer-start.sh
+    file: ../../components/explorers/start.sh
   postgres_init_v1:
-    file: ./explorer-postgres-init.sh
+    file: ../../components/explorers/postgres-init.sh
   browser_v1:
-    file: ../../explorers/blockscout-browser.sh
+    file: ../../../explorers/blockscout-browser.sh
   gateway_v2:
-    file: ./explorer-nginx.conf.template
+    file: ../../components/explorers/nginx.conf.template
 volumes:
   postgres:
     external: true

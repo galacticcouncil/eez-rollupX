@@ -19,11 +19,12 @@ x-relay: &relay
   image: ethpandaops/mev-boost-relay@sha256:3600f04fcaf0bbb231f4737470f094fdf2314db54b4853197fa369aea90f8b19
   entrypoint: [sh, /relay-start.sh]
   configs:
-    - source: relay_start_v3
+    - source: relay_start_v4
       target: /relay-start.sh
   volumes: [genesis:/genesis:ro]
   networks: [l1, relay]
   environment:
+    EEZ_RELAY_DATABASE: eez_devnet_relay
     REDIS_URI: redis:6379
     BEACON_URIS: http://beacon:5052
     SEC_PER_SLOT: '12'
@@ -37,8 +38,9 @@ services:
     image: postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
     environment:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+      EEZ_RELAY_DATABASE: eez_devnet_relay
     configs:
-      - source: postgres_init_v1
+      - source: postgres_init_v2
         target: /docker-entrypoint-initdb.d/10-relay.sh
         mode: 0555
     secrets:
@@ -81,10 +83,10 @@ services:
       <<: *relay-deploy
       replicas: 1
 configs:
-  relay_start_v3:
-    file: ./relay-start.sh
-  postgres_init_v1:
-    file: ./provision-relay.sh
+  relay_start_v4:
+    file: ../../components/pbs/relay-start.sh
+  postgres_init_v2:
+    file: ../../components/pbs/provision-relay.sh
 volumes:
   genesis:
     external: true

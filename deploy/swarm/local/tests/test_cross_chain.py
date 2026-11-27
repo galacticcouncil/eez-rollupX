@@ -14,8 +14,8 @@ REPO = ROOT.parents[2]
 
 class CrossChainTest(unittest.TestCase):
     def test_fee_overlay_preserves_initial_defaults_and_matches_private_profile(self):
-        base = yaml.safe_load((ROOT / "l2.yml").read_text())
-        overlay = yaml.safe_load((ROOT / "l2-fees.yml").read_text())
+        base = yaml.safe_load((ROOT / "stacks/l2.yml").read_text())
+        overlay = yaml.safe_load((ROOT / "stacks/l2-fees.yml").read_text())
         profile = yaml.safe_load((REPO / "testing/kurtosis/devnet-args.yaml").read_text())
         self.assertEqual(set(overlay['services']), {'eez-node'})
         env = overlay['services']['eez-node']['environment']
@@ -28,7 +28,7 @@ class CrossChainTest(unittest.TestCase):
             self.assertEqual(env[name], 'true')
 
     def test_check_is_finite_and_cannot_write_deployment_or_git_metadata(self):
-        stack = yaml.safe_load((ROOT / "cross-chain.yml").read_text())
+        stack = yaml.safe_load((ROOT / "checks/cross-chain.yml").read_text())
         check = stack["services"]["check"]
         self.assertEqual(check["deploy"]["restart_policy"], {"condition": "none"})
         self.assertNotIn("ports", check)
@@ -60,9 +60,9 @@ esac
 ''')
                 cast.chmod(0o755)
                 # Only remap container filesystem paths; execute the real admission.
-                script = (ROOT / "cross-chain-check.sh").read_text()
+                script = (ROOT / "checks/cross-chain-check.sh").read_text()
                 script = script.replace('/out/', str(out) + '/')
-                script = script.replace('/l2-fixtures.env', str(ROOT / 'l2-fixtures.env'))
+                script = script.replace('/l2-fixtures.env', str(ROOT / 'fixtures/l2-fixtures.env'))
                 script = script.replace('/evidence', str(root / 'evidence'))
                 result = subprocess.run(['bash', '-c', script], capture_output=True,
                                         text=True, env={**os.environ,

@@ -35,9 +35,9 @@ services:
           memory: 4G
 configs:
   check:
-    file: ./cross-chain-check.sh
+    file: cross-chain-check.sh
   fixtures:
-    file: ./l2-fixtures.env
+    file: ../fixtures/l2-fixtures.env
 volumes:
   deployment:
     external: true

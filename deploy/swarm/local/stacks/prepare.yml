@@ -22,7 +22,7 @@ services:
         condition: none
 configs:
   prepare_v2:
-    file: ./prepare.sh
+    file: ../scripts/prepare.sh
 volumes:
   genesis:
     external: true

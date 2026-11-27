@@ -133,7 +133,7 @@ that relay path to the L1 proposer. The selected validator proposes the resultin
 beacon block, and the other validators attest through L1's consensus protocol.
 
 Redis and PostgreSQL support the relay's coordination and records. They do not
-determine L2 execution validity. The [private L1 builder runbook](../../deploy/swarm/devnet/PBS.md)
+determine L2 execution validity. The [private L1 builder runbook](../../deploy/swarm/local/docs/PBS.md)
 describes these services and their operational checks.
 
 ## 7. On-chain acceptance establishes settlement

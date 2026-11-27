@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ExplorersTest(unittest.TestCase):
     def setUp(self):
-        self.stack = yaml.safe_load((ROOT / "explorers.yml").read_text())
+        self.stack = yaml.safe_load((ROOT / "stacks/explorers.yml").read_text())
 
     def test_services_use_private_networks_and_bounded_logs(self):
         self.assertEqual(set(self.stack["networks"]), {"l1", "explorers"})
@@ -25,7 +25,7 @@ class ExplorersTest(unittest.TestCase):
             secrets = {s["source"] for s in service.get("secrets", [])}
             self.assertEqual("postgres_password" in secrets, name == "postgres")
         self.assertEqual(self.stack["services"]["postgres"]["networks"], ["explorers"])
-        self.assertIn("NOSUPERUSER NOCREATEDB NOCREATEROLE", (ROOT / "explorer-postgres-init.sh").read_text())
+        self.assertIn("NOSUPERUSER NOCREATEDB NOCREATEROLE", (ROOT / "../components/explorers/postgres-init.sh").read_text())
 
     def test_each_chain_has_its_own_runtime_credentials_and_genesis(self):
         for chain, chain_id in (("l1", 414141), ("l2", 424242)):

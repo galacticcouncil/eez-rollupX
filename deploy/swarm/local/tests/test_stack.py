@@ -11,8 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class DevnetStackTest(unittest.TestCase):
     def setUp(self):
-        self.stack = yaml.safe_load((ROOT / "stack.yml").read_text())
-        self.prepare = yaml.safe_load((ROOT / "prepare.yml").read_text())
+        self.stack = yaml.safe_load((ROOT / "stacks/l1.yml").read_text())
+        self.prepare = yaml.safe_load((ROOT / "stacks/prepare.yml").read_text())
 
     def test_images_are_immutable_and_ports_private(self):
         for service in self.stack["services"].values():
@@ -48,12 +48,12 @@ class DevnetStackTest(unittest.TestCase):
         manifest = json.loads((ROOT.parents[1] / "networks/local.example.json").read_text())
         self.assertEqual(manifest["l1_chain_id"], 414141)
         self.assertEqual(manifest["l2_chain_id"], 424242)
-        self.assertIn(f'export CHAIN_ID={manifest["l1_chain_id"]} ', (ROOT / "prepare.sh").read_text())
-        self.assertIn(hex(manifest["l1_chain_id"]), (ROOT / "check.sh").read_text())
+        self.assertIn(f'export CHAIN_ID={manifest["l1_chain_id"]} ', (ROOT / "scripts/prepare.sh").read_text())
+        self.assertIn(hex(manifest["l1_chain_id"]), (ROOT / "checks/check.sh").read_text())
 
     def test_every_runtime_and_setup_task_has_bounded_logs(self):
-        for filename in ("stack.yml", "relay.yml", "builder.yml", "boost.yml", "l2.yml",
-                         "prepare.yml", "pbs-bootstrap.yml", "l2-deploy.yml"):
+        for filename in ("stacks/l1.yml", "stacks/relay.yml", "stacks/builder.yml", "stacks/boost.yml", "stacks/l2.yml",
+                         "stacks/prepare.yml", "stacks/pbs-bootstrap.yml", "stacks/l2-deploy.yml"):
             stack = yaml.safe_load((ROOT / filename).read_text())
             for name, service in stack["services"].items():
                 self.assertEqual(service["logging"], {

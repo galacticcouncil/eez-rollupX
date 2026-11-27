@@ -28,9 +28,9 @@ services:
         order: stop-first
 configs:
   deploy_v3:
-    file: ./l2-deploy.sh
+    file: ../scripts/l2-deploy.sh
   fixtures_v1:
-    file: ./l2-fixtures.env
+    file: ../fixtures/l2-fixtures.env
 volumes:
   genesis:
     external: true

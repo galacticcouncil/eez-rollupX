@@ -33,6 +33,16 @@ Stop the complete devnet while retaining its data:
 sudo bash scripts/local-devnet.sh down
 ```
 
+To **erase and recreate** the complete devnet with fresh state:
+
+```sh
+sudo bash scripts/local-devnet.sh reset        # preview resources and images
+sudo bash scripts/local-devnet.sh reset --yes  # delete state and provision again
+```
+
+Reset reuses installed images and recreates L1, PBS, L2 and both explorers.
+See [reset requirements and recovery](deploy/swarm/local/README.md#reset-the-whole-devnet).
+
 `up` reuses existing images, configuration, keys and volumes. It does not
 provision a new network. See [first-time setup and operations](deploy/swarm/local/README.md)
 for installation, explorer access, logs and recovery. Pending unsettled requests

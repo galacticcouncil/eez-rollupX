@@ -53,7 +53,7 @@ class DevnetStackTest(unittest.TestCase):
 
     def test_every_runtime_and_setup_task_has_bounded_logs(self):
         for filename in ("stacks/l1.yml", "stacks/relay.yml", "stacks/builder.yml", "stacks/boost.yml", "stacks/l2.yml",
-                         "stacks/prepare.yml", "stacks/pbs-bootstrap.yml", "stacks/l2-deploy.yml"):
+                         "stacks/prepare.yml", "stacks/pbs-bootstrap.yml", "stacks/builder-fund.yml", "stacks/l2-deploy.yml"):
             stack = yaml.safe_load((ROOT / filename).read_text())
             for name, service in stack["services"].items():
                 self.assertEqual(service["logging"], {

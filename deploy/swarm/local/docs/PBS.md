@@ -49,6 +49,17 @@ The public builder fixture `0xb9e79D19f651a941757b35830232E7EFC77E1c79` needs te
 ETH for its configured 1 ETH bid subsidy. Fund it before testing. Never share
 canonical datadirs with the builder or use fixture keys on Lark.
 
+For fresh installation only, submit the one-shot fixture funding job with the
+matching `EEZ_DEVNET_DEPLOY_IMAGE` selected:
+
+```sh
+sudo env EEZ_DEVNET_DEPLOY_IMAGE=YOUR_DEPLOY_IMAGE docker stack deploy --detach=true \
+  --resolve-image never -c deploy/swarm/local/stacks/builder-fund.yml eez-devnet-builder-fund
+sudo docker service ps eez-devnet-builder-fund_fund --no-trunc
+```
+
+Require `Complete`/exit 0 before continuing. Whole-devnet reset includes this step.
+
 ```sh
 sudo docker stack deploy --detach=true --resolve-image never \
   -c deploy/swarm/local/stacks/builder.yml eez-devnet-builder

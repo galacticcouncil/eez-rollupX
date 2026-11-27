@@ -54,6 +54,9 @@ scale_group() {
 }
 
 case "${1:-}" in
+    reset)
+        exec python3 "$repo/deploy/swarm/local/scripts/reset.py" "${@:2}"
+        ;;
     up|down)
         wait_seconds="${EEZ_DEVNET_WAIT_SECONDS:-180}"
         [[ "$wait_seconds" =~ ^[1-9][0-9]{0,3}$ ]] || { echo 'EEZ_DEVNET_WAIT_SECONDS must be 1..9999.' >&2; exit 1; }
@@ -220,7 +223,7 @@ case "${1:-}" in
             eez-devnet-l2_eez-beacon=0 eez-devnet-l2_eez-proof-signer=0
         ;;
     *)
-        echo 'usage: bash scripts/local-devnet.sh up|down|status-all|check-all|prepare|start|status|check|check-pbs|stop|l2-deploy|l2-start|l2-status|l2-stop|explorer-prepare|explorer-start|explorer-stop' >&2
+        echo 'usage: bash scripts/local-devnet.sh reset [--yes]|up|down|status-all|check-all|prepare|start|status|check|check-pbs|stop|l2-deploy|l2-start|l2-status|l2-stop|explorer-prepare|explorer-start|explorer-stop' >&2
         exit 2
         ;;
 esac

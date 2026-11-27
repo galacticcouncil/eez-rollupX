@@ -15,6 +15,8 @@ Use the [scripts/local-devnet.sh](../../scripts/local-devnet.sh) entrypoint.
 
 Source relocation does not update running tasks. Existing stack, service,
 network, volume and secret names are retained; no data moves.
+An explicit [whole-devnet reset](local/README.md#reset-the-whole-devnet) instead
+discards current local state and installs these definitions from scratch.
 
 Changed launchers use immutable configs `relay_start_v4`, `postgres_init_v2`
 and `start_v3`. Apply complete stack definitions together with their inputs:

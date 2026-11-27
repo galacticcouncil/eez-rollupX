@@ -17,6 +17,7 @@ before reconstructing a process from scripts, old logs, or an earlier conversati
 | Start and check a Composer on Ethereum mainnet, Hoodi or Sepolia | [Ethereum node](ethereum-node.md) | Static Compose checks, unit tests and builder acceptance probes; not yet run against a synced Ethereum node |
 | Trace Composer gas for selected source hashes or an address | [Composer gas traces](composer-gas-tracing.md) | Hash-mode Chiado evidence; address-mode local coverage |
 | Run L2 Blockscout, Chiado Blobscan, or both | [Optional explorers](explorers.md) | Compose/helper and isolated Blobscan source checks; full stack rehearsal pending; operated outside CI |
+| Run a local Hydration network with a 2-of-3 signer quorum and test it from outside | [Local Hydration network](local-network.md) | See the runbook's verification status; operated outside CI |
 
 Use `docs/proposals/` for intended changes, `docs/audits/` for dated evidence,
 and `docs/runbooks/` for the current procedure. Keep host-specific deployment

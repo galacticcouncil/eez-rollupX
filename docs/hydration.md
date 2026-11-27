@@ -52,6 +52,7 @@ L1 simulations retain stock precompiles.
 | HYD-07 | Adapter present; not production-wired | Provide a ZisK proof-system adapter that binds schema, public-input hash, program verification key, rollup ID, manager registration, and the external ZisK verifier call. The branch does not wire a real Hydration-aware guest/prover or a production deployment path. | `contracts/src/zisk`; `contracts/test/zisk` |
 | HYD-08 | Test-only | Provide `CounterRelay` for process-test calls and `MockZiskVerifier` for adapter tests. Neither contract is a production authorization or proof system. | `contracts/src/CounterRelay.sol`; `contracts/src/zisk/MockZiskVerifier.sol` |
 | HYD-09 | Supporting tooling and operations | Include the Hydration process-test binary in native artifact inventories and document the optional genesis section and seed in the Chiado deployment runbook. | `scripts/ci/native-tests.py`; `scripts/ci/tests/test_native_artifacts.py`; `docs/runbooks/chiado-deployment.md` |
+| HYD-10 | Local development tooling | A local Compose network with `config.hydration`, three signers and threshold two on the Composer's built-in L1, plus an outside test where a counter increment drives an L2-to-L1 call and settles. Not CI-run. | `docker-compose.local.yml`; `scripts/local-network.sh`; `scripts/local-network/`; `docs/runbooks/local-network.md` |
 
 ## Consensus and execution invariants
 

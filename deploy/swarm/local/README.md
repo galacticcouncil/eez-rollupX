@@ -57,8 +57,10 @@ sudo bash scripts/local-devnet.sh reset --yes
 
 This deletes the current L1/L2 chains, validator state, relay PostgreSQL/Redis,
 explorer databases/caches and devnet secrets. It creates fresh genesis, credentials
-and contracts, funds the builder with 100 fixture ETH, enables synthetic fee quotes
-and starts both explorers. Old transactions and pending requests are discarded.
+and contracts, funds the builder with 100 fixture ETH, sends a 0.01 ETH PBS canary,
+enables synthetic fee quotes and starts both explorers. A counter canary increments
+the fresh counter from 0 to 1 and verifies canonical settlement. Old transactions
+and pending requests are discarded.
 
 Requires Python 3/PyYAML and the single-node data Swarm. Required images must
 already exist locally; reset infers the five node/signer/deploy/backend/frontend
@@ -76,15 +78,18 @@ sudo env EEZ_DEVNET_NODE_IMAGE=YOUR_NODE_IMAGE \
   bash scripts/local-devnet.sh reset --yes
 ```
 
-Reset waits for successful setup/readiness jobs, including first L1 finality;
-allow roughly 15–25 minutes. `EEZ_DEVNET_SETUP_WAIT_SECONDS` sets each phase's
-timeout (default 1800, range 1–9999). It stops on failure without automatically
+Reset waits for successful setup/readiness jobs, including first L1 finality.
+The final checks cover both explorer homepages/APIs and nonzero indexed blocks.
+Cold genesis and first finality can take 30 minutes or more.
+`EEZ_DEVNET_SETUP_WAIT_SECONDS` sets each phase's timeout (default 3600, range
+1–9999). It stops on failure without automatically
 retrying funding or contract broadcasts. Inspect the reported task/logs before
 recovery. For another complete reset after partial setup, supply all five image
 variables explicitly if their services are missing.
 
-Only the named current-devnet resources are removed. Unrelated services, images,
-saved evidence, protocol compiler caches and old-network archives remain.
+The reset removes current-devnet services/task containers, the listed state
+volumes and secrets. Docker may also collect their disposable anonymous volumes.
+Unrelated services, images, saved evidence, compiler caches and old-network archives remain.
 There is no rollback of erased state; recovery creates another fresh network.
 Use `down` / `up` when you want to keep the chain.
 
@@ -97,7 +102,7 @@ five image variables and use `reset --yes` above; the staged procedure is:
 | --- | --- |
 | 1 | Prepare/start L1 below; require its readiness job to pass. |
 | 2 | [Provision relay, builder and MEV-Boost](docs/PBS.md); require PBS checks to pass. |
-| 3 | [Select images, deploy contracts and start L2](docs/L2.md). |
+| 3 | [Select images, deploy contracts, start L2 and run the counter canary](docs/L2.md). |
 | 4 | [Add both explorers and private access](docs/EXPLORERS.md). |
 | 5 | Use the full lifecycle commands above. |
 

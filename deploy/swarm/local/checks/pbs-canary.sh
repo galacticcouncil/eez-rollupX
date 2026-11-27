@@ -3,10 +3,12 @@
 set -euo pipefail
 [[ "$(cast chain-id --rpc-url http://execution:8545)" == 414141 ]]
 ready=false
-for attempt in {1..30}; do
+for attempt in {1..180}; do
     head=$(timeout 3 cast block-number --rpc-url http://execution:8545) || head=-1
     builder_head=$(timeout 3 cast block-number --rpc-url http://builder:8545) || builder_head=-2
-    if (( head >= 0 && builder_head == head )) && timeout 3 bash -c ': >/dev/tcp/builder/8645'; then
+    if (( head >= 0 && builder_head == head )) && timeout 3 bash -c ': >/dev/tcp/builder/8645' &&
+        curl -fsS --max-time 3 http://relay-api:9062/relay/v1/builder/validators |
+        jq -e 'type == "array" and length > 0' >/dev/null; then
         ready=true
         break
     fi

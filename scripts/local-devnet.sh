@@ -161,15 +161,21 @@ case "${1:-}" in
             docker service ps "${stack}_$role" --no-trunc
         done
         ;;
-    check|check-pbs|check-all)
+    check|check-pbs|check-all|check-explorers)
         # New immutable config/task per run preserves the script and its evidence.
         stamp="$(date -u +%y%m%d%H%M%S)"
         config="eez-devnet-check-$stamp"
         probe="eez-devnet-check-$stamp"
         check_script=checks/check.sh
+        check_network=eez-devnet_l1
         attempts=80
         if [[ "$1" == check-pbs ]]; then
             check_script=checks/check-pbs.sh
+            attempts=60
+        fi
+        if [[ "$1" == check-explorers ]]; then
+            check_script=checks/check-explorers.sh
+            check_network=eez-devnet-explorers_explorers
             attempts=60
         fi
         mounts=()
@@ -186,7 +192,7 @@ case "${1:-}" in
         docker service create --detach=true --name "$probe" --restart-condition none \
             --constraint node.labels.platform.data==true \
             --log-driver json-file --log-opt max-size=20m --log-opt max-file=3 \
-            --network eez-devnet_l1 "${configs[@]}" "${mounts[@]}" \
+            --network "$check_network" "${configs[@]}" "${mounts[@]}" \
             --entrypoint bash "$image" -c \
             "for ((attempt=1; attempt<=$attempts; attempt++)); do $command && exit 0; sleep 12; done; exit 1"
         echo "Monitor check: docker service logs -f $probe"
@@ -223,7 +229,7 @@ case "${1:-}" in
             eez-devnet-l2_eez-beacon=0 eez-devnet-l2_eez-proof-signer=0
         ;;
     *)
-        echo 'usage: bash scripts/local-devnet.sh reset [--yes]|up|down|status-all|check-all|prepare|start|status|check|check-pbs|stop|l2-deploy|l2-start|l2-status|l2-stop|explorer-prepare|explorer-start|explorer-stop' >&2
+        echo 'usage: bash scripts/local-devnet.sh reset [--yes]|up|down|status-all|check-all|check-explorers|prepare|start|status|check|check-pbs|stop|l2-deploy|l2-start|l2-status|l2-stop|explorer-prepare|explorer-start|explorer-stop' >&2
         exit 2
         ;;
 esac

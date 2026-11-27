@@ -51,6 +51,12 @@ curl -fsS -o /dev/null http://127.0.0.1:18112/
 curl -fsS http://127.0.0.1:18112/api/v2/stats
 ```
 
+For either access profile, submit the overlay readiness job and require `Complete`/exit 0:
+
+```sh
+sudo bash scripts/local-devnet.sh check-explorers
+```
+
 For permanent tailnet access, inspect `tailscale serve status` first. If HTTPS
 ports 8444/8445 are free, add these routes while preserving existing routes:
 

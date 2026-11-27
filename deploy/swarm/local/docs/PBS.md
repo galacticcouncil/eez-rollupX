@@ -64,6 +64,21 @@ Require `Complete`/exit 0 before continuing. Whole-devnet reset includes this st
 sudo docker stack deploy --detach=true --resolve-image never \
   -c deploy/swarm/local/stacks/builder.yml eez-devnet-builder
 sudo docker stack deploy --detach=true -c deploy/swarm/local/stacks/boost.yml eez-devnet-boost
+```
+
+On a quiet fresh chain, submit the one-shot 0.01 test-ETH bundle canary to exercise
+the builder, then check that delivery was canonical:
+
+```sh
+sudo env EEZ_DEVNET_DEPLOY_IMAGE=YOUR_DEPLOY_IMAGE docker stack deploy --detach=true \
+  --resolve-image never -c deploy/swarm/local/stacks/pbs-canary.yml eez-devnet-pbs-canary
+sudo docker service ps eez-devnet-pbs-canary_canary --no-trunc
+```
+
+Require canary `Complete`/exit 0. It waits for builder catch-up and nonempty relay
+duties, then broadcasts once; it does not retry a missed target. Next:
+
+```sh
 sudo bash scripts/local-devnet.sh check-pbs
 ```
 

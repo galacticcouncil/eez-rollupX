@@ -1,0 +1,34 @@
+version: '3.8'
+services:
+  canary:
+    image: ${EEZ_DEVNET_DEPLOY_IMAGE:?Select the matching deployment image}
+    entrypoint: [bash, /canary.sh]
+    configs:
+      - source: canary_v1
+        target: /canary.sh
+      - source: fixtures_v1
+        target: /l2-fixtures.env
+    volumes: [deployment:/out:ro]
+    networks: [l1]
+    logging:
+      driver: json-file
+      options: {max-size: 20m, max-file: '3'}
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.labels.platform.data == true]
+      restart_policy:
+        condition: none
+configs:
+  canary_v1:
+    file: ../checks/l2-canary.sh
+  fixtures_v1:
+    file: ../fixtures/l2-fixtures.env
+volumes:
+  deployment:
+    external: true
+    name: eez-devnet-424242-deployment
+networks:
+  l1:
+    external: true
+    name: eez-devnet_l1

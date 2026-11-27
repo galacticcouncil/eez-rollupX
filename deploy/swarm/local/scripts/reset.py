@@ -23,7 +23,7 @@ STACKS = (
     "eez-devnet", "eez-devnet-414141-prep", "eez-devnet-pbs",
     "eez-devnet-pbs-bootstrap", "eez-devnet-builder", "eez-devnet-boost",
     "eez-devnet-l2", "eez-devnet-l2-deploy", "eez-devnet-explorers",
-    "eez-devnet-builder-fund",
+    "eez-devnet-builder-fund", "eez-devnet-pbs-canary", "eez-devnet-l2-canary",
 )
 VOLUMES = tuple(f"eez-devnet-414141-{role}" for role in (
     "genesis", "execution", "beacon", "validators", "postgres", "redis", "pbs",
@@ -46,8 +46,8 @@ IMAGE_INPUTS = {
 }
 FILES = (
     ("prepare.yml",), ("l1.yml",), ("relay.yml",), ("pbs-bootstrap.yml",),
-    ("builder.yml",), ("boost.yml",), ("builder-fund.yml",),
-    ("l2-deploy.yml",), ("l2.yml", "l2-fees.yml"),
+    ("builder.yml",), ("boost.yml",), ("builder-fund.yml",), ("pbs-canary.yml",),
+    ("l2-deploy.yml",), ("l2.yml", "l2-fees.yml"), ("l2-canary.yml",),
     ("explorers.yml",),
 )
 
@@ -73,8 +73,9 @@ def namespace(obj):
     return obj.get("Spec", {}).get("Labels", {}).get("com.docker.stack.namespace")
 
 
-def fixture_job(name):
-    return name.startswith(("eez-devnet-", "eez-l2-canary-", "eez-restart-"))
+def fixture_job(spec):
+    return (spec["Name"].startswith(("eez-devnet-", "eez-l2-canary-", "eez-restart-"))
+            and spec["TaskTemplate"].get("RestartPolicy", {}).get("Condition") == "none")
 
 
 def references(spec, network_ids, secret_ids, config_ids=()):
@@ -134,7 +135,7 @@ def preflight():
     for service in services:
         spec = service["Spec"]
         attached = references(spec, network_ids, secret_ids, configs)
-        if namespace(service) in STACKS or (attached and fixture_job(spec["Name"])):
+        if namespace(service) in STACKS or (attached and fixture_job(spec)):
             owned.append(service)
         elif attached:
             raise RuntimeError(f"Foreign service uses devnet resources: {spec['Name']}")
@@ -255,13 +256,20 @@ def reset(env, owned, networks, configs, containers, seconds):
     wait_job("eez-devnet-builder-fund_fund", seconds)
     deploy("eez-devnet-builder", "builder.yml", env=env)
     deploy("eez-devnet-boost", "boost.yml", env=env)
+    # A quiet fresh chain may produce no bids until the builder receives work.
+    deploy("eez-devnet-pbs-canary", "pbs-canary.yml", env=env)
+    wait_job("eez-devnet-pbs-canary_canary", seconds)
     check("check-pbs", env, seconds)
     helper("l2-deploy", env)
     wait_job("eez-devnet-l2-deploy_deploy", seconds)
     deploy("eez-devnet-l2", "l2.yml", "l2-fees.yml", env=env)
+    # Empty-block policy may retain a genesis safe head until there is actual work.
+    deploy("eez-devnet-l2-canary", "l2-canary.yml", env=env)
+    wait_job("eez-devnet-l2-canary_canary", seconds)
     helper("explorer-prepare", env)
     helper("explorer-start", env)
     check("check-all", env, seconds)
+    check("check-explorers", env, seconds)
     print("Fresh devnet ready: L1 414141 / L2 424242, fees enabled, both explorers installed.", flush=True)
 
 
@@ -277,7 +285,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--yes", action="store_true", help="delete all current devnet state and recreate it")
     args = parser.parse_args()
-    seconds = os.environ.get("EEZ_DEVNET_SETUP_WAIT_SECONDS", "1800")
+    seconds = os.environ.get("EEZ_DEVNET_SETUP_WAIT_SECONDS", "3600")
     if not re.fullmatch(r"[1-9][0-9]{0,3}", seconds):
         parser.error("EEZ_DEVNET_SETUP_WAIT_SECONDS must be 1..9999.")
     # Shared by reset invocations across checkouts; never lock the inode being deleted.

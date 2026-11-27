@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/reset.py"
-SPEC = importlib.util.spec_from_file_location("devnet_reset", PATH)
+SPEC = importlib.util.spec_from_file_location("devnet_reset", SCRIPT)
 reset = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(reset)
 
@@ -21,6 +21,7 @@ def service(name, stack=None, mounts=(), networks=(), secret_ids=()):
         "TaskTemplate": {"ContainerSpec": {"Image": "fixture:" + name,
             "Mounts": [{"Type": "volume", "Source": v} for v in mounts],
             "Secrets": [{"SecretID": s} for s in secret_ids]},
+            "RestartPolicy": {"Condition": "none"},
             "Networks": [{"Target": n} for n in networks]}}}
 
 
@@ -92,6 +93,13 @@ class ResetTest(unittest.TestCase):
                          "Labels": {"com.docker.stack.namespace": "eez-devnet"}}}]
         foreign = service("other_app")
         foreign["Spec"]["TaskTemplate"]["ContainerSpec"]["Configs"] = [{"ConfigID": "shared-config"}]
+        self.services.append(foreign)
+        with self.assertRaisesRegex(RuntimeError, "Foreign service"):
+            self.plan()
+
+    def test_unknown_persistent_app_with_devnet_prefix_is_not_treated_as_a_probe(self):
+        foreign = service("eez-devnet-monitor_app", "eez-devnet-monitor", networks=["l1-id"])
+        foreign["Spec"]["TaskTemplate"]["RestartPolicy"]["Condition"] = "on-failure"
         self.services.append(foreign)
         with self.assertRaisesRegex(RuntimeError, "Foreign service"):
             self.plan()

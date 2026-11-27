@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1
+# Local semantic validation tools, separate from persistent node images.
+ARG DEPLOY_IMAGE
+FROM rust:1.96.0-bookworm AS tools
+COPY scripts/ci/install-llvm.sh /usr/local/lib/eez/install-llvm.sh
+RUN bash /usr/local/lib/eez/install-llvm.sh
+ENV LLVM_SYS_231_PREFIX=/usr/lib/llvm-23
+ENV PATH="/usr/lib/llvm-23/bin:${PATH}"
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang libclang-dev pkg-config cmake libssl-dev git ca-certificates protobuf-compiler mold \
+    && rm -rf /var/lib/apt/lists/*
+ENV RUST_MIN_STACK=16777216
+ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
+ENV CARGO_BUILD_JOBS=4
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+# A disposable target avoids retaining another multi-gigabyte compiler cache.
+RUN --mount=type=cache,id=cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=cargo-git,target=/usr/local/cargo/git,sharing=locked \
+    cargo build --locked --release -p eez-protocol -p eez-l1 \
+      --example e2e-causal-verify --example verify_blob_evidence --features eez-l1/chain-spec \
+    && install -D target/release/examples/e2e-causal-verify /out/e2e-causal-verify \
+    && install -D target/release/examples/verify_blob_evidence /out/verify_blob_evidence \
+    && rm -rf target
+
+FROM ${DEPLOY_IMAGE}
+RUN apt-get update && apt-get install -y --no-install-recommends bc openssl gawk \
+    && rm -rf /var/lib/apt/lists/* \
+    && git config --global --add safe.directory /repo \
+    && git config --global --add safe.directory /repo/eez-core-protocol
+COPY --from=tools /out/ /usr/local/bin/
+COPY testing/kurtosis/ports.sh ./testing/kurtosis/ports.sh
+COPY testing/kurtosis/scripts ./testing/kurtosis/scripts
+COPY scripts/ci ./scripts/ci
+ENV EEZ_CAUSAL_VERIFIER_BIN=/usr/local/bin/e2e-causal-verify
+ENV EEZ_BLOB_VERIFIER_BIN=/usr/local/bin/verify_blob_evidence
+ENV RAYON_NUM_THREADS=2 TOKIO_WORKER_THREADS=2
+ENTRYPOINT ["bash"]

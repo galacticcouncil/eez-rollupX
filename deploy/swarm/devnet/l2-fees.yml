@@ -1,0 +1,19 @@
+# Synthetic private-network assumptions from the pinned Kurtosis devnet profile.
+# Apply with l2.yml using the SAME node/signer images and existing volumes.
+version: '3.8'
+services:
+  eez-node:
+    environment:
+      EEZ_FEES_L1_TO_L2_ENABLED: 'true'
+      EEZ_FEES_L2_TO_L1_ENABLED: 'true'
+      EEZ_L2_FEE_RECIPIENT: '0x4444444444444444444444444444444444444444'
+      EEZ_FEES_L1_PER_L2_NUMERATOR: '1'
+      EEZ_FEES_L1_PER_L2_DENOMINATOR: '1'
+      EEZ_FEES_PROVING_COST_L1: '0'
+      EEZ_FEES_OPERATIONS_COST_L1: '0'
+      EEZ_FEES_TREASURY_COST_L1: '0'
+      EEZ_FEES_RISK_BPS: '0'
+      EEZ_FEES_PROFIT_BPS: '2000'
+      EEZ_FEES_EXCLUDED_SENDERS: ''
+      EEZ_FEES_L1_REFUND_RECIPIENT: '0x5555555555555555555555555555555555555555'
+      EEZ_FEES_L1_REFUND_PERCENT: '90'

@@ -13,7 +13,9 @@ RESULT_DIR="${EEZ_CI_RESULT_DIR:-$REPO/artifacts/kurtosis-e2e}/protocol-e2e"
 export RAYON_NUM_THREADS="${RAYON_NUM_THREADS:-2}"
 export TOKIO_WORKER_THREADS="${TOKIO_WORKER_THREADS:-2}"
 
-for tool in bash bc cast curl find flock forge git jq kurtosis python3 sha256sum; do
+tools=(bash bc cast curl find flock forge git jq python3 sha256sum)
+if [[ "${EEZ_USE_LOCAL_DEPLOYMENTS:-0}" != 1 ]]; then tools+=(kurtosis); fi
+for tool in "${tools[@]}"; do
     command -v "$tool" >/dev/null || { echo "$tool not found in PATH" >&2; exit 1; }
 done
 

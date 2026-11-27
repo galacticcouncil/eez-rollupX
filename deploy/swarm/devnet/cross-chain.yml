@@ -1,0 +1,57 @@
+# Finite semantic exercise; never part of daily up/down or automatic restart.
+version: '3.8'
+services:
+  check:
+    image: ${EEZ_DEVNET_VALIDATION_IMAGE:?Select the built semantic validation image}
+    entrypoint: [bash, /check.sh]
+    configs:
+      - source: check
+        target: /check.sh
+      - source: fixtures
+        target: /l2-fixtures.env
+    volumes:
+      - deployment:/out:ro
+      - evidence:/evidence
+      - protocol_out:/repo/eez-core-protocol/out
+      - protocol_cache:/repo/eez-core-protocol/cache
+      # Only Git identity metadata is needed from the host. Sources are in the image.
+      - type: bind
+        source: ${EEZ_DEVNET_CHECKOUT:?Set the absolute matching configuration checkout}/.git
+        target: /repo/.git
+        read_only: true
+    networks: [l1]
+    logging:
+      driver: json-file
+      options: {max-size: 20m, max-file: '3'}
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.labels.platform.data == true]
+      restart_policy:
+        condition: none
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+configs:
+  check:
+    file: ./cross-chain-check.sh
+  fixtures:
+    file: ./l2-fixtures.env
+volumes:
+  deployment:
+    external: true
+    name: eez-devnet-424242-deployment
+  evidence:
+    external: true
+    name: ${EEZ_DEVNET_VALIDATION_VOLUME:?Create a fresh evidence volume for this run}
+  protocol_out:
+    external: true
+    name: eez-devnet-protocol-84a5b520-out
+  protocol_cache:
+    external: true
+    name: eez-devnet-protocol-84a5b520-cache
+networks:
+  l1:
+    external: true
+    name: eez-devnet_l1

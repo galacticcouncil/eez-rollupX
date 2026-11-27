@@ -81,6 +81,11 @@ known local-only development key; never use it on a public network. See
 [`testing/kurtosis/README.md`](testing/kurtosis/README.md) for prerequisites,
 test workloads, and lifecycle commands.
 
+For a lighter network on one machine (macOS or Linux) with Hydration rules and
+a 2-of-3 signer quorum on the Composer's built-in L1, run
+`bash scripts/local-network.sh up` and then `bash scripts/local-network.sh test`.
+See the [local Hydration network](docs/runbooks/local-network.md) runbook.
+
 ## Run a chiado L2 (Docker)
 
 Runs three containers: `eez-node` (whose entrypoint is the `eez-composer`

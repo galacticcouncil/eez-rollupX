@@ -31,6 +31,8 @@ For backport reviews or implementation, follow the
   variable. Kurtosis scripts default to `eez-ci`, including destructive
   `testing/kurtosis/stop.sh`. Follow the
   [Kurtosis guide](testing/kurtosis/README.md).
+- The [local Hydration network](docs/runbooks/local-network.md) (Compose project
+  `eez-local`) uses fixed host ports and named volumes; its `reset` deletes them.
 - Concurrent protocol Anvil suites need disjoint `BASE_PORT` ranges: the
   [runner](scripts/ci/run-protocol-anvil.sh) allocates two ports per scenario.
 - Respect the [staged Chiado runner](scripts/run-chiado-staged-performance.sh)'s

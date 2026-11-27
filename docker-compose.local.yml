@@ -1,0 +1,245 @@
+# Local development network: Hydration rules on, three proof signers, and any
+# two of them settle. The Composer runs its built-in development L1 (5 s
+# blocks), so no external chain is needed. Runs on macOS (Docker Desktop) and
+# Linux. Drive it with scripts/local-network.sh; see docs/runbooks/local-network.md.
+#
+# The built-in L1 RPC listens only on the Composer's loopback, so every service
+# that talks to it joins the `pod` service's network namespace (one localhost).
+# The signers are separate containers, reached by name.
+
+name: eez-local
+
+# Public Anvil development keys (mnemonic "test test ... junk"). Local only.
+x-keys:
+  poster: &poster_key "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+  deployer: &deployer_key "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+  app-deployer: &app_deployer_key "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6"
+  user: &user_key "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a"
+  signer-1: &signer_1_key "0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba"
+  signer-2: &signer_2_key "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e"
+  signer-3: &signer_3_key "0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6"
+  oracle: &oracle_key "0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356"
+  keeper: &keeper_key "0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97"
+
+x-network:
+  l1-chain-id: &l1_chain_id "1337"
+  l2-chain-id: &l2_chain_id "1338"
+  l1-block-time-ms: &l1_block_time_ms "5000"
+  l2-block-time-ms: &l2_block_time_ms "1000"
+
+x-signer: &signer
+  image: eez-proof-signer:local
+  pull_policy: never
+  restart: unless-stopped
+  volumes:
+    - state:/state:ro
+  entrypoint: ["/bin/sh", "-c"]
+  command:
+    - |
+      set -a; . /state/network.env; . /state/signer-$$SIGNER_NUMBER.env; set +a
+      exec eez-proof-signer --listen-addr 0.0.0.0:50061 \
+        --chain-config /state/l2-genesis.json --l1-chain-config /state/l1-genesis.json \
+        --registry-address "$$EEZ_REGISTRY_ADDRESS" --manager-address "$$EEZ_ROLLUP_MANAGER_ADDRESS" \
+        --rollup-id "$$EEZ_ROLLUP_ID" --vkey "$$SIGNER_VKEY" \
+        --attester-address "$$SIGNER_ADDRESS" --proof-system "$$SIGNER_PROOF_SYSTEM" \
+        --l2-system-address 0xfffffffffffffffffffffffffffffffffffffffe
+  healthcheck:
+    test: ["CMD", "nc", "-z", "127.0.0.1", "50061"]
+    interval: 2s
+    retries: 30
+
+x-tools: &tools
+  image: eez-deploy:local
+  pull_policy: never
+  profiles: ["jobs"]
+  network_mode: service:pod
+  volumes:
+    - state:/state
+    - ./scripts/local-network:/local:ro
+    - contracts-out:/repo/contracts/out
+    - contracts-cache:/repo/contracts/cache
+
+services:
+  # Owns the shared network namespace and the host ports.
+  pod:
+    image: python:3.12-slim
+    init: true
+    command: ["sleep", "infinity"]
+    ports:
+      - "127.0.0.1:18545:18545" # L1 RPC (through the bundle stub)
+      - "127.0.0.1:18688:18688" # L2 RPC
+      - "127.0.0.1:18998:18998" # L2 front: L2 transactions that call L1
+      - "127.0.0.1:18999:18999" # L1 front: L1 transactions that call L2
+
+  # One-shot: genesis files, contract addresses and signer keys into `state`.
+  init:
+    build:
+      context: .
+      dockerfile: testing/kurtosis/Dockerfile.deploy
+      args:
+        EEZ_NODE_IMAGE: eez-node:local
+    image: eez-deploy:local
+    pull_policy: never
+    profiles: ["jobs"]
+    network_mode: none
+    entrypoint: ["bash", "/local/init.sh"]
+    environment:
+      L1_CHAIN_ID: *l1_chain_id
+      L2_CHAIN_ID: *l2_chain_id
+      L1_BLOCK_TIME_MS: *l1_block_time_ms
+      L2_BLOCK_TIME_MS: *l2_block_time_ms
+      DEPLOYER_KEY: *deployer_key
+      SIGNER_1_KEY: *signer_1_key
+      SIGNER_2_KEY: *signer_2_key
+      SIGNER_3_KEY: *signer_3_key
+      ORACLE_KEY: *oracle_key
+      KEEPER_KEY: *keeper_key
+    volumes:
+      - state:/state
+      - ./scripts/local-network:/local:ro
+      - ./crates/eez-node-e2e/tests/fixtures/genesis.json:/fixture/genesis.json:ro
+
+  signer-1:
+    <<: *signer
+    build:
+      context: .
+      dockerfile: Dockerfile.signer
+    environment:
+      SIGNER_NUMBER: "1"
+      EEZ_PROOF_SIGNER_KEY: *signer_1_key
+  signer-2:
+    <<: *signer
+    environment:
+      SIGNER_NUMBER: "2"
+      EEZ_PROOF_SIGNER_KEY: *signer_2_key
+  signer-3:
+    <<: *signer
+    environment:
+      SIGNER_NUMBER: "3"
+      EEZ_PROOF_SIGNER_KEY: *signer_3_key
+
+  # Accepts the Composer's eth_sendBundle for the built-in L1 and keeps a copy
+  # of each blob transaction for the beacon stub. Also proxies plain L1 RPC.
+  builder-stub:
+    image: python:3.12-slim
+    init: true
+    network_mode: service:pod
+    restart: unless-stopped
+    volumes:
+      - ./scripts/builder-stub.py:/app/builder-stub.py:ro
+      - blob-captures:/captures
+    command: ["python3", "/app/builder-stub.py", "--listen", "0.0.0.0:18545",
+              "--upstream", "http://127.0.0.1:18645", "--capture-dir", "/captures",
+              "--passthrough-bundles"]
+
+  beacon:
+    image: node:24-slim
+    init: true
+    network_mode: service:pod
+    restart: unless-stopped
+    volumes:
+      - ./scripts/local-network/beacon-stub.mjs:/app/beacon-stub.mjs:ro
+      - blob-captures:/captures:ro
+    command: ["node", "/app/beacon-stub.mjs", "--listen", "127.0.0.1:5052",
+              "--l1-rpc", "http://127.0.0.1:18645", "--capture-dir", "/captures"]
+
+  composer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: eez-node:local
+    pull_policy: never
+    init: true
+    network_mode: service:pod
+    restart: unless-stopped
+    stop_grace_period: 1m
+    depends_on:
+      signer-1: {condition: service_healthy}
+      signer-2: {condition: service_healthy}
+      signer-3: {condition: service_healthy}
+      builder-stub: {condition: service_started}
+      beacon: {condition: service_started}
+    volumes:
+      - state:/state:ro
+      - composer-data:/data
+    environment:
+      # Built-in development L1 (the same settings as the Rust process tests).
+      EEZ_L1_CHAIN: testing
+      EEZ_L1_CHAIN_ID: *l1_chain_id
+      EEZ_L1_CHAIN_PATH: /state/l1-genesis.json
+      EEZ_L1_CHAIN_CONFIG: /state/l1-genesis.json
+      EEZ_L1_DATADIR: /data/l1
+      EEZ_L1_HTTP_PORT: "18645"
+      EEZ_L1_AUTH_PORT: "18651"
+      EEZ_L1_P2P_PORT: "30544"
+      EEZ_L1_DISCV5_PORT: "30545"
+      EEZ_L1_RPC_URL: http://127.0.0.1:18645
+      EEZ_L1_TARGET_RPC_URL: http://127.0.0.1:18645
+      EEZ_L1_BUILDER_RPC_URL: http://127.0.0.1:18545
+      EEZ_L1_BEACON_URL: http://127.0.0.1:5052
+      EEZ_L1_BLOB_SIDECAR_ENCODING: eip7594
+      EEZ_L1_POSTER_KEY: *poster_key
+      # L2 and the cross-chain fronts.
+      EEZ_L2_DATADIR: /data/l2
+      EEZ_L2_RPC_URL: http://127.0.0.1:18688
+      EEZ_L1_XCHAIN_PORT: "18999"
+      EEZ_L2_XCHAIN_PORT: "18998"
+      EEZL2_ADDRESS: "0x4b2760f84b83d6b3829e30a7573b0172b6d6402c"
+      EEZ_REGISTRY_DEPLOY_BLOCK: "0"
+      EEZ_COMPOSER_EXPECT_EXTERNAL_BATCHES: "false"
+      EEZ_WITNESS_DB_PATH: /data/witnesses
+      # Signer 1 alone until roster.env adds EEZ_PROVERS (all three signers).
+      EEZ_PROVER_URL: http://signer-1:50061
+      # Timing and settlement. Plain L2 activity settles at least once a minute.
+      EEZ_L1_BLOCK_TIME_MS: *l1_block_time_ms
+      EEZ_L2_BLOCK_TIME_MS: *l2_block_time_ms
+      EEZ_SETTLEMENT_START_AFTER_BLOCK: "3"
+      EEZ_PROOF_TIME_MS: "1000"
+      EEZ_SUBMISSION_SLACK_MS: "100"
+      EEZ_SETTLEMENT_PURE_L2_MODE: interval
+      EEZ_SETTLEMENT_PURE_L2_INTERVAL_MS: "60000"
+      EEZ_SETTLEMENT_MAX_UNSETTLED_L2_BLOCKS: "1000000"
+      EEZ_MAX_SPECULATIVE_DEPTH: "0"
+      EEZ_L1_POSTBATCH_MAX_FEE_PER_GAS: "500000000000"
+      EEZ_L1_POSTBATCH_MAX_FEE_PER_BLOB_GAS: "500000000000"
+      EEZ_L1_POSTBATCH_MAX_PRIORITY_FEE: "100000000000"
+      RUST_LOG: warn,eez_node=info,eez_l1=info,eez_composer=info,eez_prover_client=info
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -a; . /state/network.env
+        if [ -f /state/roster.env ]; then . /state/roster.env; fi
+        set +a
+        exec eez-composer node --chain /state/l2-genesis.json --datadir /data/l2 \
+          --http --http.addr 0.0.0.0 --http.port 18688 --http.api eth,net,web3,txpool \
+          --authrpc.addr 127.0.0.1 --authrpc.port 18684 \
+          --port 30640 --disable-discovery --ipcdisable
+    healthcheck:
+      # The built-in L1 answers first; the L2 RPC waits for the deployed contracts.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/18645"]
+      interval: 2s
+      retries: 60
+
+  # One-shot: deploy and register the contracts, write roster.env.
+  contracts:
+    <<: *tools
+    entrypoint: ["bash", "/local/setup-contracts.sh"]
+    environment:
+      L1_CHAIN_ID: *l1_chain_id
+      DEPLOYER_KEY: *deployer_key
+
+  # One-shot: the outside test (scripts/local-network/test-counter-relay.sh).
+  test:
+    <<: *tools
+    entrypoint: ["bash", "/local/test-counter-relay.sh"]
+    environment:
+      L2_CHAIN_ID: *l2_chain_id
+      APP_DEPLOYER_KEY: *app_deployer_key
+      USER_KEY: *user_key
+
+volumes:
+  state:
+  composer-data:
+  blob-captures:
+  contracts-out:
+  contracts-cache:

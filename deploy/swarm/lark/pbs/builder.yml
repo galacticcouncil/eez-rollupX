@@ -1,0 +1,94 @@
+version: '3.8'
+x-logging: &logging
+  driver: json-file
+  options: {max-size: '20m', max-file: '3'}
+x-runtime: &runtime
+  replicas: 0
+  placement:
+    constraints: ['node.id == ${EEZ_LARK_DATA_NODE:?Select the persistent Lark data node}']
+  update_config: {order: stop-first}
+  rollback_config: {order: stop-first}
+  restart_policy: {condition: on-failure, delay: 10s}
+  resources:
+    limits: {cpus: '2.0', memory: 2G}
+    reservations: {cpus: '0.10', memory: 256M}
+services:
+  builder:
+    image: ethpandaops/reth-rbuilder@sha256:916ba84da2690e3e368f57da5b0c73bfd919b452de8b95f64895846e0f3a8308
+    entrypoint: [/app/rbuilder]
+    command:
+      - node
+      - --chain=/genesis/metadata/genesis.json
+      - --datadir=/builder
+      - --http
+      - --http.addr=0.0.0.0
+      - --http.api=eth,net,web3,flashbots,admin
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.jwtsecret=/run/secrets/engine-jwt
+      - --trusted-peers=__EXECUTION_PEER__
+      - --disable-discovery
+      - --rbuilder.config=/run/secrets/builder-config
+      - --engine.persistence-threshold=0
+      - --engine.memory-block-buffer-target=0
+      - --txpool.no-local-transactions-propagation
+      - --rpc.eth-proof-window=3
+      - --builder.gaslimit=60000000
+    environment: {CL_ENDPOINT: 'http://builder-beacon:5052'}
+    volumes: [genesis:/genesis:ro, builder:/builder]
+    secrets:
+      - {source: engine_jwt, target: engine-jwt}
+      - {source: builder_config, target: builder-config}
+    networks: [l1]
+    logging: *logging
+    stop_grace_period: 2m
+    deploy:
+      <<: *runtime
+      resources:
+        limits: {cpus: '8.0', memory: 6G}
+        reservations: {cpus: '0.25', memory: 1G}
+  builder-beacon:
+    image: sigp/lighthouse@sha256:9e71f6db59d358acb43719fcc5240952811821cc2fc4c3cfa90e57f2e4b38288
+    entrypoint: [lighthouse]
+    command:
+      - bn
+      - --testnet-dir=/genesis/metadata
+      - --datadir=/beacon
+      - --execution-endpoint=http://builder:8551
+      - --execution-jwt=/run/secrets/engine-jwt
+      - --http
+      - --http-address=0.0.0.0
+      - --enable-private-discovery
+      - --boot-nodes=__BEACON_ENR__
+      - --libp2p-addresses=__BEACON_PEER__
+      - --checkpoint-sync-url=http://beacon:5052
+      - --supernode
+      - --always-prepare-payload
+      - --suggested-fee-recipient=__TREASURY__
+    volumes: [genesis:/genesis:ro, builder_beacon:/beacon]
+    secrets: [{source: engine_jwt, target: engine-jwt}]
+    networks: [l1]
+    logging: *logging
+    stop_grace_period: 2m
+    deploy: *runtime
+  mev-boost:
+    image: ethpandaops/mev-boost@sha256:47ef3f0c7166cbfc5e925921b6448be7e67b6d47615e9f1f36b098b3905fb223
+    entrypoint: [sh, /boost-start.sh]
+    configs: [{source: boost_start, target: /boost-start.sh}]
+    volumes: [genesis:/genesis:ro, pbs:/pbs:ro]
+    networks: [l1]
+    logging: *logging
+    deploy:
+      <<: *runtime
+      resources:
+        limits: {cpus: '0.50', memory: 128M}
+        reservations: {cpus: '0.02', memory: 16M}
+volumes:
+  genesis: {external: true, name: eez-lark-1-686868-genesis}
+  pbs: {external: true, name: eez-lark-1-686868-pbs}
+  builder: {external: true, name: eez-lark-1-686868-builder}
+  builder_beacon: {external: true, name: eez-lark-1-686868-builder-beacon}
+networks:
+  l1: {external: true, name: eez-lark-1_l1}
+secrets:
+  engine_jwt: {external: true, name: eez-lark-1-builder-engine-jwt}
+  builder_config: {external: true, name: eez-lark-1-builder-config}

@@ -1,0 +1,83 @@
+version: '3.8'
+x-logging: &logging
+  driver: json-file
+  options: {max-size: '20m', max-file: '3'}
+x-runtime: &runtime
+  replicas: 0
+  placement:
+    constraints: ['node.id == ${EEZ_LARK_DATA_NODE:?Select the persistent Lark data node}']
+  update_config: {order: stop-first}
+  rollback_config: {order: stop-first}
+  restart_policy: {condition: on-failure, delay: 10s}
+  resources:
+    limits: {cpus: '1.0', memory: 512M}
+    reservations: {cpus: '0.05', memory: 32M}
+x-relay: &relay
+  image: ethpandaops/mev-boost-relay@sha256:3600f04fcaf0bbb231f4737470f094fdf2314db54b4853197fa369aea90f8b19
+  entrypoint: [sh, /relay-start.sh]
+  configs: [{source: relay_start, target: /relay-start.sh}]
+  volumes: [genesis:/genesis:ro]
+  networks: [l1, relay]
+  logging: *logging
+  environment:
+    EEZ_RELAY_DATABASE: eez_lark_relay
+    REDIS_URI: redis:6379
+    BEACON_URIS: http://beacon:5052
+    SEC_PER_SLOT: '12'
+    SLOTS_PER_EPOCH: '32'
+    DB_TABLE_PREFIX: eez_lark
+    ENABLE_BUILDER_CANCELLATIONS: '1'
+  deploy: *runtime
+services:
+  postgres:
+    image: postgres:17-bookworm@sha256:3645570cccdfa447589da9f57dd740faa29b30938e861289a5574b6ca6b03826
+    logging: *logging
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+      EEZ_RELAY_DATABASE: eez_lark_relay
+    configs: [{source: postgres_init, target: /docker-entrypoint-initdb.d/10-relay.sh, mode: 0555}]
+    secrets:
+      - {source: postgres_password, target: postgres-password}
+      - {source: relay_password, target: relay-password}
+    volumes: [postgres:/var/lib/postgresql/data]
+    networks: [relay]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres -d postgres']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    stop_grace_period: 1m
+    deploy: *runtime
+  redis:
+    image: redis:alpine@sha256:becdda6c7f4b3fb42e42fd7f120bbf5c54c4caaaf16f26da24e4563d2c1f0576
+    command: [redis-server, --appendonly, 'yes']
+    volumes: [redis:/data]
+    networks: [relay]
+    logging: *logging
+    deploy: *runtime
+  relay-housekeeper:
+    <<: *relay
+    command: [housekeeper, --network, custom, --beacon-uris, 'http://beacon:5052', --listen-addr, '0.0.0.0:9064']
+    secrets: [{source: relay_password, target: relay-password}]
+  relay-api:
+    <<: *relay
+    command: [api, --network, custom, --beacon-uris, 'http://beacon:5052', --listen-addr, '0.0.0.0:9062', --blocksim, 'http://builder:8545']
+    secrets:
+      - {source: relay_password, target: relay-password}
+      - {source: relay_signing_key, target: relay-signing-key}
+    deploy:
+      <<: *runtime
+      resources:
+        limits: {cpus: '2.0', memory: 1G}
+        reservations: {cpus: '0.10', memory: 64M}
+volumes:
+  genesis: {external: true, name: eez-lark-1-686868-genesis}
+  postgres: {external: true, name: eez-lark-1-686868-postgres}
+  redis: {external: true, name: eez-lark-1-686868-redis}
+networks:
+  l1: {external: true, name: eez-lark-1_l1}
+  relay: {driver: overlay}
+secrets:
+  postgres_password: {external: true, name: eez-lark-1-postgres-password}
+  relay_password: {external: true, name: eez-lark-1-relay-password}
+  relay_signing_key: {external: true, name: eez-lark-1-relay-signing-key}

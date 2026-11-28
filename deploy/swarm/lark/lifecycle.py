@@ -73,7 +73,8 @@ class State(AbstractContextManager):
                 fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             self.data = json.loads(self.path.read_text()) if self.path.exists() else {
                 'schema': 1, 'target': self.target, 'resources': {}, 'stacks': {}, 'services': {}}
-            require(self.data.get('schema') == 1 and self.data.get('target') == self.target,
+            require(type(self.data.get('schema')) is int and self.data['schema'] in (1, 2)
+                    and self.data.get('target') == self.target,
                     "saved Lark state belongs to another target or schema")
         except (BlockingIOError, OSError, ValueError, DeploymentError):
             if self.lock:
@@ -193,7 +194,7 @@ class Lifecycle:
 
     def config(self, filename):
         content = (ROOT / filename).read_bytes()
-        name = PREFIX + '-' + filename.removesuffix('.sh') + '-' + hashlib.sha256(content).hexdigest()[:12]
+        name = PREFIX + '-' + Path(filename).stem + '-' + hashlib.sha256(content).hexdigest()[:12]
         self.resource('configs', name, {'configName': name, 'data': base64.b64encode(content).decode()})
         return name
 
@@ -203,7 +204,8 @@ class Lifecycle:
         if entry:
             require(entry['status'] == 'submitted', "an earlier stack POST is inconclusive; inspect before retry")
             return
-        self.data['stacks'][name] = {'status': 'pending', 'compose': spec}
+        # Flatten YAML anchors so changing one role's replicas cannot start peers.
+        self.data['stacks'][name] = {'status': 'pending', 'compose': json.loads(json.dumps(spec))}
         self.state.save()
         self.api.post('stacks', {'name': name, 'spec': {'compose': json.dumps(spec)}})
         self.data['stacks'][name]['status'] = 'submitted'
@@ -238,17 +240,61 @@ class Lifecycle:
             time.sleep(5)
         raise DeploymentError("EEZ job is not complete; it remains retained and will not be resubmitted")
 
-    def wait_runtime(self, expected):
+    def wait_stack(self, stack, expected):
         deadline = time.monotonic() + self.timeout
         while time.monotonic() < deadline:
-            services = self.services(PREFIX)
+            services = self.services(stack)
             if len(services) == len(expected) and all(
                     item.get('replicas') == expected[item['serviceName'].split('_', 1)[1]]
                     and item.get('status', {}).get('tasks', {}).get('running') ==
                     expected[item['serviceName'].split('_', 1)[1]] for item in services):
-                return
+                # Counts exclude desired-shutdown tasks before the process exits.
+                # Wait for data writers to actually stop before allowing restart.
+                stopped = [item for item in services
+                           if expected[item['serviceName'].split('_', 1)[1]] == 0]
+                terminal = ('shutdown', 'complete', 'failed', 'rejected', 'remove')
+                if all(all(task.get('state') in terminal for task in
+                           self.api.get('services/'+item['id']+'/tasks')) for item in stopped):
+                    return
             time.sleep(5)
         raise DeploymentError("EEZ runtime did not converge; inspect retained tasks without resetting state")
+
+    def wait_runtime(self, expected):
+        self.wait_stack(PREFIX, expected)
+
+    def remember_stack(self, stack):
+        expected = {role: service['deploy']['replicas'] for role, service in
+                    self.data['stacks'][stack]['compose']['services'].items()}
+        self.wait_stack(stack, expected)
+        values = {item['serviceName']: fingerprint(item) for item in self.services(stack)}
+        self.data['stacks'][stack]['fingerprints'] = values
+        if stack == PREFIX:
+            self.data['fingerprints'] = values
+        self.state.save()
+
+    def verify_stack(self, stack):
+        entry = self.data['stacks'][stack]
+        require(entry['status'] == 'submitted', "EEZ stack submission is inconclusive; inspect before retry")
+        saved = self.api.get('stacks/' + stack + '/file')
+        require(digest(yaml.safe_load(saved['spec']['compose'])) == digest(entry['compose']),
+                "Swarmpit EEZ stack differs from saved state; reconcile operator edits before applying")
+        live = self.services(stack)
+        expected = self.data.get('fingerprints') if stack == PREFIX else entry.get('fingerprints')
+        require(expected == {item['serviceName']: fingerprint(item) for item in live},
+                "live EEZ runtime settings changed; reconcile operator edits before applying")
+        require(all(item['replicas'] == entry['compose']['services'][item['serviceName'].split('_', 1)[1]]
+                    ['deploy']['replicas'] for item in live),
+                "live EEZ replica targets changed; reconcile operator edits before applying")
+        return entry
+
+    def scale_role(self, stack, role, replicas):
+        entry = self.verify_stack(stack)
+        if entry['compose']['services'][role]['deploy']['replicas'] != replicas:
+            entry['compose']['services'][role]['deploy']['replicas'] = replicas
+            self.state.save()
+            self.api.post('stacks/' + stack, {'name': stack, 'spec': {'compose': json.dumps(entry['compose'])}})
+        self.wait_stack(stack, {name: service['deploy']['replicas']
+                               for name, service in entry['compose']['services'].items()})
 
     def bootstrap(self, node, tool):
         if 'node_id' not in self.data:
@@ -273,7 +319,7 @@ class Lifecycle:
             self.submit(preparation, self.data['stacks'][preparation]['compose'])
         print('Waiting for EEZ Lark genesis/validator preparation.', flush=True)
         identity = self.wait_job(preparation)
-        receipt = receipt_from_logs(self.api.get('services/' + identity + '/logs?since=0'))
+        receipt = receipt_from_logs(self.api.get('services/' + identity + '/logs?since=1970-01-01T00:00:00Z'))
         self.data['receipt'] = receipt
         self.data['phase'] = 'prepared'
         self.state.save()
@@ -306,7 +352,7 @@ class Lifecycle:
     def finish_check(self, name):
         print('Waiting for EEZ Lark identity, head advancement and first finality.', flush=True)
         identity = self.wait_job(name)
-        logs = self.api.get('services/' + identity + '/logs?since=0')
+        logs = self.api.get('services/' + identity + '/logs?since=1970-01-01T00:00:00Z')
         require(any('LARK_L1_READY chain=686868 ' in item.get('line', '') for item in logs),
                 "completed readiness job has no success marker")
 
@@ -319,6 +365,7 @@ class Lifecycle:
         return {'check': name, 'status': 'passed'}
 
     def scale(self, replicas):
+        require(not self.data.get('pbs'), "PBS is installed or being prepared; use up/down for the complete EEZ stack")
         require(PREFIX in self.data['stacks'], "bootstrap EEZ Lark before changing its runtime replicas")
         self.validate_node(self.data['node_id'])
         entry = self.data['stacks'][PREFIX]

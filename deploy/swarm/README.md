@@ -4,7 +4,7 @@
 | --- | --- |
 | [components/](components/README.md) | Reusable PBS, node/signer and explorer startup code |
 | [local/](local/README.md) | L1 414141 / L2 424242 stacks, fixtures, setup, checks and tests |
-| [lark/](lark/README.md) | L1 686868 API bootstrap/lifecycle; L2 696969 assembly pending |
+| [lark/](lark/README.md) | L1 686868 and builder/relay API bootstrap/lifecycle; L2 696969 assembly pending |
 
 Under `local/`, `stacks/` defines services/setup jobs, `scripts/` owns genesis and
 deployment, `fixtures/` holds public test inputs, `checks/` holds probes/canaries,

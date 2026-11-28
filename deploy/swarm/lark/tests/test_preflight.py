@@ -67,6 +67,14 @@ class ApiTest(unittest.TestCase):
             client.post('secrets', {'secretName': 'eez-lark-1-engine-jwt', 'data': 'example'})
             client.request.assert_called_once()
 
+    def test_retained_logs_use_an_explicit_timestamp_not_zero_minutes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            client = self.client(directory)
+            client.request = Mock(return_value=[])
+            self.assertEqual(client.get('services/'+NODE+'/logs?since=1970-01-01T00:00:00Z'),[])
+            with self.assertRaises(lark.PreflightError):
+                client.get('services/'+NODE+'/logs?since=0')
+
     def test_redirects_and_server_error_bodies_cannot_expose_token(self):
         with self.assertRaises(lark.PreflightError):
             lark.NoRedirects().redirect_request(None, None, 302, '', {}, 'https://elsewhere.org')

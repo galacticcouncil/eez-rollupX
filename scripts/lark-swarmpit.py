@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare and operate only the dedicated EEZ Lark L1 through Swarmpit."""
+"""Prepare and operate the dedicated EEZ Lark L1 and PBS through Swarmpit."""
 
 import argparse
 import json
@@ -18,6 +18,7 @@ import yaml
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "deploy/swarm/lark"))
 from lifecycle import DeploymentError, Lifecycle, State  # noqa: E402
+from pbs.lifecycle import PbsLifecycle  # noqa: E402
 
 
 class PreflightError(Exception):
@@ -56,7 +57,7 @@ class Swarmpit:
 
     def get(self, resource):
         if (resource not in ("version", "nodes", "services", "stacks", "networks", "volumes", "secrets")
-                and not re.fullmatch(r"services/[a-z0-9]{25}/(?:tasks|logs\?since=0)", resource)
+                and not re.fullmatch(r"services/[a-z0-9]{25}/(?:tasks|logs\?since=1970-01-01T00:00:00Z)", resource)
                 and not re.fullmatch(r"stacks/eez-lark-1(?:-[a-z0-9-]+)?/(?:file|services)", resource)):
             raise PreflightError("unsupported preflight resource")
         return self.request("GET", resource)
@@ -158,7 +159,8 @@ def main():
     render = commands.add_parser("render-l1", help="render a public L1 stack to stdout, offline")
     render.add_argument("--node-id", required=True)
     render.add_argument("--fee-recipient", required=True)
-    for command in ("bootstrap-l1", "l1-start", "l1-stop", "l1-status", "l1-check"):
+    for command in ("bootstrap-l1", "l1-start", "l1-stop", "l1-status", "l1-check",
+                    "bootstrap-pbs", "up", "down", "status", "check", "diagnose", "retry-canary", "probe-pbs"):
         operation = commands.add_parser(command)
         operation.add_argument("--url", required=True)
         operation.add_argument("--token-file", type=Path,
@@ -169,6 +171,8 @@ def main():
             operation.add_argument("--node-id", required=True)
             operation.add_argument("--validator-tool", type=Path, required=True,
                                    help="eth2-val-tools extracted by deploy/swarm/lark/tools.sh")
+        if command in ("bootstrap-pbs", "probe-pbs"):
+            operation.add_argument("--cast", type=Path, required=True, help="pinned Foundry 1.7.1 cast binary")
     args = parser.parse_args()
     try:
         if args.command == "inspect":
@@ -179,8 +183,8 @@ def main():
             if not 30 <= args.timeout <= 7200:
                 raise PreflightError("timeout must be between 30 and 7200 seconds")
             api = Swarmpit(args.url, args.token_file)
-            with State(args.state_dir, api.base, readonly=args.command == "l1-status") as state:
-                lifecycle = Lifecycle(api, state, render_l1, args.timeout)
+            with State(args.state_dir, api.base, readonly=args.command in ("l1-status", "status")) as state:
+                lifecycle = PbsLifecycle(api, state, render_l1, args.timeout)
                 if args.command == "bootstrap-l1":
                     result = lifecycle.bootstrap(args.node_id, args.validator_tool)
                 elif args.command == "l1-start":
@@ -189,6 +193,18 @@ def main():
                     result = lifecycle.scale(0)
                 elif args.command == "l1-check":
                     result = lifecycle.check()
+                elif args.command == "bootstrap-pbs":
+                    result = lifecycle.bootstrap_pbs(args.cast)
+                elif args.command in ("up", "down"):
+                    result = lifecycle.all_scale(int(args.command == "up"))
+                elif args.command == "check":
+                    result = lifecycle.pbs_check() if state.data.get('pbs') else lifecycle.check()
+                elif args.command == "diagnose":
+                    result = lifecycle.diagnose()
+                elif args.command == "retry-canary":
+                    result = lifecycle.retry_canary()
+                elif args.command == "probe-pbs":
+                    result = lifecycle.probe(args.cast)
                 else:
                     result = lifecycle.status()
         # JSON is valid YAML and is accepted as a Compose document by Swarm.
@@ -196,6 +212,9 @@ def main():
     except (PreflightError, DeploymentError) as error:
         print(f"lark-swarmpit: {error}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        print("lark-swarmpit: interrupted; submitted EEZ jobs remain running and retained", file=sys.stderr)
+        return 130
     except (OSError, ValueError, TypeError):
         print("lark-swarmpit: invalid input or unreadable private configuration/state", file=sys.stderr)
         return 1
